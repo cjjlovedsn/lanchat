@@ -75,6 +75,20 @@ macOS 首次运行注意：
 3. 未签名 app 可能被 Gatekeeper 拦截：右键 → 打开，或
    `xattr -cr /path/to/lanchat.app`。建议用自己的 Apple ID 在 Xcode 里免费签名后分发
 
+## 发布（GitHub Actions 自动构建）
+
+推 tag 即自动构建三端产物并发布 GitHub Release（无需任何 token）：
+
+```
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+- Windows runner：analyze + test + 便携版 zip + Inno Setup 安装包（版本号取自 tag）
+- Ubuntu runner：安卓 APK
+- macOS runner：未签名 .app 压缩包（失败不阻塞发布，也可在 Mac 上自行构建）
+- 产物自动挂到对应 tag 的 Release 页
+
 ## 协议
 
 - 发现：UDP 多播 `224.0.0.198:38701`，3 秒一次广播 JSON `{proto,id,name,platform,port}`，10 秒无包判离线；同时辅以子网定向广播兜底

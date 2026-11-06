@@ -2,7 +2,9 @@
 ; build:  ISCC.exe lanchat.iss   (from the installer/ directory)
 
 #define MyAppName "LanChat"
-#define MyAppVersion "1.0.0"
+#ifndef MyAppVersion
+  #define MyAppVersion "1.0.0"
+#endif
 #define MyAppExeName "lanchat.exe"
 
 [Setup]
