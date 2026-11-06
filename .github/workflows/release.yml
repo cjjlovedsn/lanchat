@@ -10,7 +10,9 @@ permissions:
 
 jobs:
   build-windows:
-    runs-on: windows-latest
+    # pinned: windows-latest (Server 2025 image) breaks Flutter 3.35's VS
+    # detection — it falls back to the VS2019 generator which doesn't exist
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
