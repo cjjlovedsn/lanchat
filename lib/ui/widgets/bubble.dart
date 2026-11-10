@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../core/util.dart';
 import '../../models/message.dart';
 import '../../state/transfers_model.dart';
+import 'image_viewer.dart';
 
 class MessageBubble extends StatelessWidget {
   final ChatMessage msg;
@@ -112,6 +113,16 @@ class FileCard extends StatelessWidget {
   final ChatMessage msg;
   const FileCard({super.key, required this.msg});
 
+  static const _imageExt = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'};
+  static const _videoExt = {'mp4', 'mkv', 'mov', 'avi', 'm4v', 'webm', '3gp'};
+
+  static String? _extOf(String? name) {
+    final n = name ?? '';
+    final dot = n.lastIndexOf('.');
+    if (dot <= 0 || dot == n.length - 1) return null;
+    return n.substring(dot + 1).toLowerCase();
+  }
+
   static IconData _iconFor(String? name) {
     final ext = (name ?? '').split('.').last.toLowerCase();
     switch (ext) {
@@ -139,8 +150,22 @@ class FileCard extends StatelessWidget {
     final path = msg.filePath;
     final hasLocal = path != null && File(path).existsSync();
     final fileGone = !msg.outgoing && !hasLocal; // received file cleaned up
+    final ext = _extOf(msg.fileName);
+    final isImage = _imageExt.contains(ext);
+    final isVideo = _videoExt.contains(ext);
     final dark = msg.outgoing ? Colors.white : Theme.of(context).colorScheme.onSurface;
     final sub = msg.outgoing ? Colors.white70 : Colors.grey;
+
+    String hint;
+    if (!hasLocal) {
+      hint = '';
+    } else if (isVideo) {
+      hint = ' · 点击播放';
+    } else if (isImage) {
+      hint = ' · 点击查看';
+    } else {
+      hint = Platform.isAndroid ? ' · 点击打开' : ' · 点击定位';
+    }
 
     final card = Row(
       mainAxisSize: MainAxisSize.min,
@@ -154,7 +179,11 @@ class FileCard extends StatelessWidget {
                 : Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(8),
           ),
-          child: Icon(_iconFor(msg.fileName), size: 22, color: msg.outgoing ? Colors.white : Theme.of(context).colorScheme.primary),
+          child: isVideo
+              ? Icon(Icons.play_circle_fill,
+                  size: 24,
+                  color: msg.outgoing ? Colors.white : Theme.of(context).colorScheme.primary)
+              : Icon(_iconFor(msg.fileName), size: 22, color: msg.outgoing ? Colors.white : Theme.of(context).colorScheme.primary),
         ),
         const SizedBox(width: 10),
         Flexible(
@@ -173,8 +202,7 @@ class FileCard extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                '${formatSize(msg.fileSize)}'
-                '${hasLocal ? (Platform.isAndroid ? ' · 点击打开' : ' · 点击定位') : ''}',
+                '${formatSize(msg.fileSize)}$hint',
                 style: TextStyle(fontSize: 11, color: sub),
               ),
               if (fileGone) ...[
@@ -197,7 +225,27 @@ class FileCard extends StatelessWidget {
       ],
     );
 
+    if (isImage && hasLocal) {
+      return InkWell(
+        onTap: () => showImageViewer(context, path),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.file(
+            File(path),
+            width: 220,
+            height: 165,
+            fit: BoxFit.cover,
+            cacheWidth: 440,
+            errorBuilder: (_, __, ___) => card,
+          ),
+        ),
+      );
+    }
+
     if (!hasLocal) return card;
-    return InkWell(onTap: () => openOrReveal(path), child: card);
+    return InkWell(
+      onTap: () => isVideo ? openDirect(path) : openOrReveal(path),
+      child: card,
+    );
   }
 }

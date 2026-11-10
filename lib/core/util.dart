@@ -47,6 +47,20 @@ Future<void> openOrReveal(String path) async {
   revealInFolder(path);
 }
 
+/// Open a file with the system default application (video playback etc.).
+Future<void> openDirect(String path) async {
+  try {
+    if (Platform.isAndroid) {
+      await OpenFilex.open(path);
+    } else if (Platform.isWindows) {
+      // 'start' treats a first quoted arg as the window title, hence the ''
+      await Process.run('cmd.exe', ['/c', 'start', '', path]);
+    } else {
+      await Process.run('open', [path]);
+    }
+  } catch (_) {}
+}
+
 /// Strip characters that are illegal in file names on Windows/macOS.
 String sanitizeFileName(String name) {
   final cleaned = name.replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1f]'), '_').trim();
