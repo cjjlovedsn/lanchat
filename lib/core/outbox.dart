@@ -175,6 +175,7 @@ class Outbox extends ChangeNotifier {
         } else {
           await sess.sendFile(
             msgId: it.msgId,
+            name: it.fileName ?? p.basename(it.blobPath ?? 'file'),
             path: it.blobPath ?? '',
             tsMs: tsMs,
             onProgress: (f) => transfers.update(it.msgId, f),

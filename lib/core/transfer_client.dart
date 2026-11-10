@@ -24,6 +24,7 @@ abstract class OutboundSession {
       {required String msgId, required String text, required int tsMs});
   Future<void> sendFile(
       {required String msgId,
+      required String name,
       required String path,
       required int tsMs,
       required void Function(double) onProgress});
@@ -71,6 +72,7 @@ class TcpOutboundSession implements OutboundSession {
   @override
   Future<void> sendFile(
       {required String msgId,
+      required String name,
       required String path,
       required int tsMs,
       required void Function(double) onProgress}) async {
@@ -81,7 +83,7 @@ class TcpOutboundSession implements OutboundSession {
       'type': 'file',
       'msgId': msgId,
       'ts': tsMs,
-      'name': p.basename(path),
+      'name': p.basename(name),
       'size': size,
       'sha256': digest.toString(),
     }, size));

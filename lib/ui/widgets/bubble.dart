@@ -138,6 +138,7 @@ class FileCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final path = msg.filePath;
     final hasLocal = path != null && File(path).existsSync();
+    final fileGone = !msg.outgoing && !hasLocal; // received file cleaned up
     final dark = msg.outgoing ? Colors.white : Theme.of(context).colorScheme.onSurface;
     final sub = msg.outgoing ? Colors.white70 : Colors.grey;
 
@@ -164,7 +165,11 @@ class FileCard extends StatelessWidget {
                 msg.fileName ?? '文件',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: dark),
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: fileGone ? Colors.grey : dark,
+                ),
               ),
               const SizedBox(height: 2),
               Text(
@@ -172,6 +177,20 @@ class FileCard extends StatelessWidget {
                 '${hasLocal ? (Platform.isAndroid ? ' · 点击打开' : ' · 点击定位') : ''}',
                 style: TextStyle(fontSize: 11, color: sub),
               ),
+              if (fileGone) ...[
+                const SizedBox(height: 2),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.delete_outline, size: 12, color: Colors.orange.shade700),
+                    const SizedBox(width: 3),
+                    Text(
+                      '文件已被清理或移动',
+                      style: TextStyle(fontSize: 11, color: Colors.orange.shade700),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),

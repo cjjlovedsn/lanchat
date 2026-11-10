@@ -16,6 +16,7 @@ class FakeSession implements OutboundSession {
   final bool failOnAcks;
   Object? failOnSendAt; // String text that should make sendText throw
   final List<String> sentTexts = [];
+  final List<String> sentFileNames = [];
 
   FakeSession({
     this.ackAll = true,
@@ -33,9 +34,11 @@ class FakeSession implements OutboundSession {
   @override
   Future<void> sendFile(
       {required String msgId,
+      required String name,
       required String path,
       required int tsMs,
       required void Function(double) onProgress}) async {
+    sentFileNames.add(name);
     onProgress(1);
   }
 
@@ -167,7 +170,8 @@ void main() {
   });
 
   test('file delivers, records source path, blob removed', () async {
-    final f = await Fixture.create();
+    final fake = FakeSession();
+    final f = await Fixture.create(sessionFactory: () => fake);
     final src =
         File('${f.store.base.path}${Platform.pathSeparator}code.dart')
           ..writeAsStringSync('void main() {}');
@@ -180,5 +184,7 @@ void main() {
     expect(hist.first.fileName, 'code.dart');
     expect(hist.first.filePath, src.path);
     expect(f.store.outboxFilesDir.listSync(), isEmpty);
+    // wire name must be the original filename, not the msgId-named blob
+    expect(fake.sentFileNames, ['code.dart']);
   });
 }
