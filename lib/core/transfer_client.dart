@@ -77,14 +77,14 @@ class TcpOutboundSession implements OutboundSession {
     final f = File(path);
     final size = await f.length();
     final digest = await sha256.bind(f.openRead()).last;
-    _sock.add(FrameWriter.encode({
+    _sock.add(FrameWriter.encodeHeader({
       'type': 'file',
       'msgId': msgId,
       'ts': tsMs,
       'name': p.basename(path),
       'size': size,
       'sha256': digest.toString(),
-    }));
+    }, size));
     var sent = 0;
     await for (final chunk in f.openRead()) {
       _sock.add(chunk);

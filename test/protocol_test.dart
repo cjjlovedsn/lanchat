@@ -56,4 +56,29 @@ void main() {
         FrameReader(Stream<Uint8List>.fromIterable(const []));
     expect(() => reader.readHeader(), throwsA(isA<SocketException>()));
   });
+
+  // Regression: sendFile writes encodeHeader(...) then streams raw chunks.
+  // The wire-declared payloadLen must equal the streamed byte count.
+  test('streamed file frame: header declares full size', () async {
+    final payload = Uint8List.fromList(List.generate(9000, (i) => i % 251));
+    final header = FrameWriter.encodeHeader(
+        {'type': 'file', 'name': 'a.bin', 'size': payload.length, 'sha256': 'x'},
+        payload.length);
+    // sender streams in arbitrary chunk sizes, all after the header
+    final chunks = <Uint8List>[header];
+    for (var i = 0; i < payload.length; i += 1000) {
+      chunks.add(Uint8List.sublistView(payload, i,
+          i + 1000 > payload.length ? payload.length : i + 1000));
+    }
+    final reader = FrameReader(Stream.fromIterable(chunks));
+
+    final h = await reader.readHeader();
+    expect(h.header['type'], 'file');
+    expect(h.payloadLen, payload.length);
+    final buf = BytesBuilder();
+    await for (final c in reader.payloadStream(h.payloadLen)) {
+      buf.add(c);
+    }
+    expect(buf.toBytes(), equals(payload));
+  });
 }

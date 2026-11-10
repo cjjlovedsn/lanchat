@@ -153,6 +153,7 @@ Future<void> serveMode(int tcpPort) async {
   });
 
   var gotMessages = 0;
+  var allFramesValid = true;
   final deadline = DateTime.now().add(const Duration(seconds: 45));
   final sub = srv.listen((sock) async {
     stderr.writeln('serve: connection from ${sock.remoteAddress.address}');
@@ -168,11 +169,28 @@ Future<void> serveMode(int tcpPort) async {
           stderr.writeln('serve: hello from ${h['name']} (${h['id']})');
         } else if (type == 'text' || type == 'file') {
           gotMessages++;
-          final text = type == 'text'
-              ? utf8.decode(f['payload'] as List<int>)
-              : '(file ${h['name']} ${(h['size'])}B sha=${h['sha256']})';
-          stderr.writeln('serve: $type ${h['msgId']} payload=$text');
-          sock.add(frame({'type': 'ack', 'msgId': h['msgId'], 'ok': true}));
+          var body = '';
+          var valid = true;
+          if (type == 'text') {
+            body = utf8.decode(f['payload'] as List<int>);
+          } else {
+            final payload = f['payload'] as List<int>;
+            final declared = (h['size'] as num?)?.toInt() ?? -1;
+            final digest = sha256.convert(payload).toString();
+            final lenOk = payload.length == declared;
+            final shaOk = digest == h['sha256'];
+            valid = lenOk && shaOk;
+            body = '(file ${h['name']} declared=${declared}B '
+                'payloadLen=${payload.length} shaOk=$shaOk)';
+          }
+          stderr.writeln('serve: $type ${h['msgId']} valid=$valid $body');
+          if (!valid) allFramesValid = false;
+          sock.add(frame({
+            'type': 'ack',
+            'msgId': h['msgId'],
+            'ok': valid,
+            if (!valid) 'reason': 'e2e-mismatch',
+          }));
           await sock.flush();
         }
       }
@@ -188,8 +206,10 @@ Future<void> serveMode(int tcpPort) async {
   announcer.cancel();
   await sub.cancel();
   await srv.close();
-  stderr.writeln('SERVE-MODE got $gotMessages message(s)');
-  exit(gotMessages > 0 ? 0 : 1);
+  final ok = gotMessages > 0 && allFramesValid;
+  stderr.writeln('SERVE-MODE ${ok ? 'PASS' : 'FAIL'} '
+      '(messages=$gotMessages allFramesValid=$allFramesValid)');
+  exit(ok ? 0 : 1);
 }
 
 int _nowMs() => DateTime.now().millisecondsSinceEpoch;

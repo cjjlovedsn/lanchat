@@ -7,12 +7,21 @@ import 'dart:typed_data';
 /// Wire format, big endian:
 ///   [u32 jsonLen][header JSON utf8][u32 payloadLen][payload bytes]
 class FrameWriter {
-  static Uint8List encode(Map<String, dynamic> header, [Uint8List? payload]) {
+  /// Header + length prefix only; the payload is appended separately. Used
+  /// for streamed file bodies where the size is known up front but the bytes
+  /// are read in chunks.
+  static Uint8List encodeHeader(Map<String, dynamic> header, int payloadLen) {
     final json = utf8.encode(jsonEncode(header));
     final out = BytesBuilder();
     out.add(_u32(json.length));
     out.add(json);
-    out.add(_u32(payload?.length ?? 0));
+    out.add(_u32(payloadLen));
+    return out.toBytes();
+  }
+
+  static Uint8List encode(Map<String, dynamic> header, [Uint8List? payload]) {
+    final out = BytesBuilder();
+    out.add(encodeHeader(header, payload?.length ?? 0));
     if (payload != null && payload.isNotEmpty) out.add(payload);
     return out.toBytes();
   }
