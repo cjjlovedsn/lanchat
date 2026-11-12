@@ -154,6 +154,30 @@ class Outbox extends ChangeNotifier {
     unawaited(flushPeer(peerId));
   }
 
+  /// Removes queued items the user deleted from the chat view
+  /// (also drops their file blobs so they are never sent).
+  Future<void> remove(String peerId, Set<String> ids) async {
+    final items = _queues[peerId];
+    if (items == null || ids.isEmpty) return;
+    final kept = <OutboxItem>[];
+    for (final it in items) {
+      if (ids.contains(it.msgId)) {
+        _deleteBlob(it);
+        transfers.remove(it.msgId);
+      } else {
+        kept.add(it);
+      }
+    }
+    if (kept.length == items.length) return;
+    if (kept.isEmpty) {
+      _queues.remove(peerId);
+    } else {
+      _queues[peerId] = kept;
+    }
+    await _persist(peerId);
+    notifyListeners();
+  }
+
   Future<void> flushPeer(String peerId) async {
     if (_busy.contains(peerId)) return;
     final peer = peers.byId(peerId);

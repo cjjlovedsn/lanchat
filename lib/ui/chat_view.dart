@@ -9,6 +9,7 @@ import '../core/config.dart';
 import '../core/outbox.dart';
 import '../core/store.dart';
 import '../core/util.dart';
+import '../models/message.dart';
 import '../state/chats_model.dart';
 import '../state/peers_model.dart';
 import 'widgets/bubble.dart';
@@ -27,12 +28,93 @@ class _ChatViewState extends State<ChatView> {
   final _scroll = ScrollController();
   bool _dragging = false;
   int _lastCount = 0;
+  final Set<String> _selected = {};
+  bool _selecting = false;
 
   @override
   void dispose() {
     _input.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  void _exitSelecting() => setState(() {
+        _selecting = false;
+        _selected.clear();
+      });
+
+  Future<void> _deleteMessages(Set<String> ids) async {
+    if (ids.isEmpty) return;
+    context.read<ChatsModel>().deleteFor(widget.peerId, ids);
+    await context.read<Outbox>().remove(widget.peerId, ids);
+    _exitSelecting();
+  }
+
+  Future<void> _confirmDeleteSelected() async {
+    final n = _selected.length;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('删除 $n 条消息？'),
+        content: const Text('仅删除本机聊天记录，不影响对方设备；已接收的文件仍保留在下载目录。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('删除')),
+        ],
+      ),
+    );
+    if (ok == true) await _deleteMessages(Set<String>.of(_selected));
+  }
+
+  Future<void> _showMsgMenu(ChatMessage msg, Offset globalPos) async {
+    String? action;
+    if (Platform.isAndroid) {
+      action = await showModalBottomSheet<String>(
+        context: context,
+        builder: (ctx) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.delete_outline),
+                title: const Text('删除该条'),
+                onTap: () => Navigator.of(ctx).pop('delete'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.checklist),
+                title: const Text('多选'),
+                onTap: () => Navigator.of(ctx).pop('select'),
+              ),
+            ],
+          ),
+        ),
+      );
+    } else {
+      final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+      action = await showMenu<String>(
+        context: context,
+        position: RelativeRect.fromLTRB(
+          globalPos.dx,
+          globalPos.dy,
+          overlay.size.width - globalPos.dx,
+          overlay.size.height - globalPos.dy,
+        ),
+        items: const [
+          PopupMenuItem(value: 'delete', height: 40, child: Text('删除该条')),
+          PopupMenuItem(value: 'select', height: 40, child: Text('多选')),
+        ],
+      );
+    }
+    if (!mounted) return;
+    switch (action) {
+      case 'delete':
+        await _deleteMessages({msg.id});
+      case 'select':
+        setState(() {
+          _selecting = true;
+          _selected.add(msg.id);
+        });
+    }
   }
 
   void _scrollToBottom() {
@@ -68,9 +150,11 @@ class _ChatViewState extends State<ChatView> {
     }
     final online = peers.isOnline(peer.id);
     final msgs = mergedChatView(chats.historyFor(peer.id), outbox.viewFor(peer.id));
-    if (msgs.length != _lastCount) {
+    if (msgs.length > _lastCount) {
       _lastCount = msgs.length;
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+    } else {
+      _lastCount = msgs.length;
     }
 
     Widget listArea = Stack(
@@ -79,7 +163,7 @@ class _ChatViewState extends State<ChatView> {
           controller: _scroll,
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           itemCount: msgs.length,
-          itemBuilder: (context, i) => MessageBubble(msg: msgs[i]),
+          itemBuilder: (context, i) => _buildRow(msgs[i]),
         ),
         if (_dragging)
           Positioned.fill(
@@ -119,7 +203,66 @@ class _ChatViewState extends State<ChatView> {
     );
   }
 
+  Widget _buildRow(ChatMessage msg) {
+    final bubble = MessageBubble(msg: msg);
+    if (_selecting) {
+      final sel = _selected.contains(msg.id);
+      return GestureDetector(
+        // absorb pointer events so taps anywhere on the row toggle selection
+        // instead of reaching the (selectable) text or image
+        onTap: () => setState(() => sel ? _selected.remove(msg.id) : _selected.add(msg.id)),
+        child: AbsorbPointer(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Icon(
+                sel ? Icons.check_circle : Icons.radio_button_unchecked,
+                size: 20,
+                color: sel ? Theme.of(context).colorScheme.primary : Colors.grey,
+              ),
+              const SizedBox(width: 6),
+              Expanded(child: bubble),
+            ],
+          ),
+        ),
+      );
+    }
+    return GestureDetector(
+      onLongPressStart: (d) => _showMsgMenu(msg, d.globalPosition),
+      onSecondaryTapUp: (d) => _showMsgMenu(msg, d.globalPosition),
+      child: bubble,
+    );
+  }
+
   Widget _header(BuildContext context, String name, String peerId, bool online) {
+    if (_selecting) {
+      return Container(
+        height: 58,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Row(
+          children: [
+            IconButton(
+              icon: const Icon(Icons.close, size: 22),
+              tooltip: '取消',
+              onPressed: _exitSelecting,
+            ),
+            Text('已选 ${_selected.length} 条',
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+            const Spacer(),
+            TextButton(
+              onPressed: _selected.isEmpty ? null : () => setState(() => _selected.clear()),
+              child: const Text('全不选'),
+            ),
+            const SizedBox(width: 4),
+            FilledButton.icon(
+              onPressed: _selected.isEmpty ? null : _confirmDeleteSelected,
+              icon: const Icon(Icons.delete_outline, size: 18),
+              label: const Text('删除'),
+            ),
+          ],
+        ),
+      );
+    }
     return Container(
       height: 58,
       padding: const EdgeInsets.symmetric(horizontal: 16),

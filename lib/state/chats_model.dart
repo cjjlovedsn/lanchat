@@ -68,6 +68,23 @@ class ChatsModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Deletes messages from history, rewriting the JSONL atomically.
+  void deleteFor(String peerId, Set<String> ids) {
+    final list = _history[peerId];
+    if (list == null || ids.isEmpty) return;
+    final kept = list.where((m) => !ids.contains(m.id)).toList();
+    if (kept.length == list.length) return;
+    _history[peerId] = kept;
+    final buf = StringBuffer();
+    for (final m in kept) {
+      buf.writeln(jsonEncode(m.toJson()));
+    }
+    try {
+      AppStore.writeAtomic(store.historyFile(peerId), buf.toString());
+    } catch (_) {}
+    notifyListeners();
+  }
+
   void openChat(String peerId) {
     activePeerId = peerId;
     unread[peerId] = 0;

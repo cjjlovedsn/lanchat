@@ -16,22 +16,32 @@ class MainActivity : FlutterActivity() {
         super.onCreate(savedInstanceState)
         val wifi =
             applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        // Both locks are best-effort: a ROM that refuses them must not crash
+        // startup — discovery still works without them, just less reliably.
         if (lock == null) {
             // Multicast lock: without it most Wi-Fi drivers filter out the
             // UDP multicast discovery packets.
-            lock = wifi.createMulticastLock("lanchat_discovery").apply {
-                setReferenceCounted(false)
-                acquire()
+            try {
+                lock = wifi.createMulticastLock("lanchat_discovery").apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+            } catch (e: Exception) {
+                lock = null
             }
         }
         if (wifiLock == null) {
             // High-perf Wi-Fi lock: keeps power-save from throttling packet
             // reception while the screen is off / app is backgrounded.
-            wifiLock = wifi.createWifiLock(
-                WifiManager.WIFI_MODE_FULL_HIGH_PERF, "lanchat_wifi"
-            ).apply {
-                setReferenceCounted(false)
-                acquire()
+            try {
+                wifiLock = wifi.createWifiLock(
+                    WifiManager.WIFI_MODE_FULL_HIGH_PERF, "lanchat_wifi"
+                ).apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+            } catch (e: Exception) {
+                wifiLock = null
             }
         }
     }

@@ -187,4 +187,32 @@ void main() {
     // wire name must be the original filename, not the msgId-named blob
     expect(fake.sentFileNames, ['code.dart']);
   });
+
+  test('deleteFor rewrites history and drops only the named ids', () async {
+    final f = await Fixture.create(connectFails: true); // stays pending
+    f.chats.onIncoming('peerA',
+        ChatMessage(id: 'in1', outgoing: false, kind: MsgKind.text, text: 'a', ts: DateTime.now(), state: SendState.received));
+    f.chats.onIncoming('peerA',
+        ChatMessage(id: 'in2', outgoing: false, kind: MsgKind.text, text: 'b', ts: DateTime.now(), state: SendState.received));
+    await f.outbox.sendText('peerA', 'queued');
+    final pendingId = f.outbox.viewFor('peerA').first.id;
+    await f.drain('peerA');
+
+    f.chats.deleteFor('peerA', {'in1', pendingId});
+    await f.outbox.remove('peerA', {pendingId});
+
+    final hist = f.chats.historyFor('peerA');
+    expect(hist.length, 1);
+    expect(hist.first.id, 'in2');
+    expect(f.outbox.viewFor('peerA'), isEmpty);
+    expect(f.store.outboxFile('peerA').existsSync(), isFalse);
+    // persisted JSONL matches memory after rewrite
+    final lines = f.store
+        .historyFile('peerA')
+        .readAsLinesSync()
+        .where((l) => l.trim().isNotEmpty)
+        .toList();
+    expect(lines.length, 1);
+    expect(lines.first.contains('"in2"'), isTrue);
+  });
 }
