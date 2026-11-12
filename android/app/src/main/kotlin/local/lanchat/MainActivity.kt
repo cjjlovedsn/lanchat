@@ -1,8 +1,15 @@
 package local.lanchat
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.net.wifi.WifiManager
+import android.os.Build
+import android.os.Environment
+import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
@@ -28,6 +35,39 @@ class MainActivity : FlutterActivity() {
             }
         }
     }
+
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "lanchat/storage")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "isGranted" -> result.success(isStorageGranted())
+                    "request" -> {
+                        try {
+                            startActivity(Intent(
+                                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                Uri.parse("package:$packageName")
+                            ))
+                            result.success(true)
+                        } catch (e: android.content.ActivityNotFoundException) {
+                            // older devices without the all-files screen
+                            try {
+                                startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                                result.success(true)
+                            } catch (e2: Exception) {
+                                result.success(false)
+                            }
+                        } catch (e: Exception) {
+                            result.success(false)
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    private fun isStorageGranted(): Boolean =
+        Build.VERSION.SDK_INT < 30 || Environment.isExternalStorageManager()
 
     companion object {
         @Volatile

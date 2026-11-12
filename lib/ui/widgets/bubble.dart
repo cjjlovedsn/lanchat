@@ -38,7 +38,7 @@ class MessageBubble extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (msg.kind == MsgKind.text)
-              Text(
+              SelectableText(
                 msg.text ?? '',
                 style: TextStyle(
                   fontSize: 14,
