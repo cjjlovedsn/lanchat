@@ -38,6 +38,15 @@ class PeersModel extends ChangeNotifier {
 
   bool isOnline(String id) => _online.contains(id);
 
+  /// Drops a known peer (e.g. a stale ghost after the other side
+  /// reinstalled and got a new device id). History is kept.
+  void removePeer(String id) {
+    if (peers.remove(id) == null) return;
+    _online.remove(id);
+    _persist();
+    notifyListeners();
+  }
+
   void upsertFromAnnounce({
     required String id,
     required String name,

@@ -91,7 +91,7 @@ git push origin v1.0.0
 
 ## 协议
 
-- 发现：UDP 多播 `224.0.0.198:38701`，3 秒一次广播 JSON `{proto,id,name,platform,port}`，10 秒无包判离线；同时辅以子网定向广播兜底
+- 发现：UDP 多播 `224.0.0.198:38701`，3 秒一次广播 JSON `{proto,id,name,platform,port}`，25 秒无包判离线；同时辅以子网定向广播兜底
 - 传输：TCP `38702`，帧格式 `[u32 jsonLen][header JSON][u32 payloadLen][payload]`；每连接先 `hello`，随后若干 `text` / `file` 帧（文件为流式 payload + sha256 校验），逐条 `ack` 确认后才出队，未确认的崩溃后可安全重发（按 msgId 去重）
 - 数据目录：Windows `%LOCALAPPDATA%\local.lanchat.lanchat`，macOS `~/Library/Application Support/local.lanchat.lanchat`，Android 应用私有目录（可用 `LANCHAT_INSTANCE` 环境变量隔离，用于同机多开测试）
 - 安卓差异：窗口/托盘/拖拽仅桌面端；竖屏手机为单栏布局（列表↔聊天）；UDP 多播需持 MulticastLock（MainActivity 已处理）；点击收到的文件用系统查看器打开（open_filex）

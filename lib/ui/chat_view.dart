@@ -3,10 +3,12 @@ import 'dart:io';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
 
 import '../core/config.dart';
 import '../core/outbox.dart';
+import '../core/storage_perm.dart';
 import '../core/store.dart';
 import '../core/util.dart';
 import '../models/message.dart';
@@ -66,7 +68,61 @@ class _ChatViewState extends State<ChatView> {
     if (ok == true) await _deleteMessages(Set<String>.of(_selected));
   }
 
+  /// Copies a received file to a user-chosen directory (Android users
+  /// otherwise can't reach the app-private download dir from other apps).
+  Future<void> _saveFileTo(ChatMessage msg) async {
+    final src = msg.filePath;
+    if (src == null || !File(src).existsSync()) return;
+    final dir = await FilePicker.getDirectoryPath();
+    if (dir == null) return;
+    if (!mounted) return;
+
+    // same gate as the settings dialog: public dirs need all-files access
+    if (!await StoragePerm.isGranted()) {
+      if (!mounted) return;
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('需要授权'),
+          content: const Text('保存到公共目录需要「所有文件访问」权限。\n去系统设置里为 LanChat 开启后，重新操作即可。'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('取消')),
+            FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('去设置')),
+          ],
+        ),
+      );
+      if (go == true) await StoragePerm.request();
+      return;
+    }
+
+    var target = File(p.join(dir, p.basename(src)));
+    if (target.existsSync()) {
+      final stem = p.basenameWithoutExtension(src);
+      final ext = p.extension(src);
+      var i = 1;
+      while (target.existsSync()) {
+        target = File(p.join(dir, '$stem ($i)$ext'));
+        i++;
+      }
+    }
+    try {
+      await File(src).copy(target.path);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已保存到 ${target.path}'), duration: const Duration(seconds: 2)),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: const Text('保存失败：目录不可写'), duration: const Duration(seconds: 2)),
+      );
+    }
+  }
+
   Future<void> _showMsgMenu(ChatMessage msg, Offset globalPos) async {
+    final canSave = msg.kind == MsgKind.file &&
+        msg.filePath != null &&
+        File(msg.filePath!).existsSync();
     String? action;
     if (Platform.isAndroid) {
       action = await showModalBottomSheet<String>(
@@ -80,6 +136,12 @@ class _ChatViewState extends State<ChatView> {
                 title: const Text('删除该条'),
                 onTap: () => Navigator.of(ctx).pop('delete'),
               ),
+              if (canSave)
+                ListTile(
+                  leading: const Icon(Icons.save_alt),
+                  title: const Text('保存到指定目录'),
+                  onTap: () => Navigator.of(ctx).pop('save'),
+                ),
               ListTile(
                 leading: const Icon(Icons.checklist),
                 title: const Text('多选'),
@@ -99,9 +161,11 @@ class _ChatViewState extends State<ChatView> {
           overlay.size.width - globalPos.dx,
           overlay.size.height - globalPos.dy,
         ),
-        items: const [
-          PopupMenuItem(value: 'delete', height: 40, child: Text('删除该条')),
-          PopupMenuItem(value: 'select', height: 40, child: Text('多选')),
+        items: [
+          const PopupMenuItem(value: 'delete', height: 40, child: Text('删除该条')),
+          if (canSave)
+            const PopupMenuItem(value: 'save', height: 40, child: Text('保存到指定目录')),
+          const PopupMenuItem(value: 'select', height: 40, child: Text('多选')),
         ],
       );
     }
@@ -109,6 +173,8 @@ class _ChatViewState extends State<ChatView> {
     switch (action) {
       case 'delete':
         await _deleteMessages({msg.id});
+      case 'save':
+        await _saveFileTo(msg);
       case 'select':
         setState(() {
           _selecting = true;
@@ -192,14 +258,22 @@ class _ChatViewState extends State<ChatView> {
       );
     }
 
-    return Column(
-      children: [
-        _header(context, peer.name, peer.id, online),
-        const Divider(height: 1),
-        Expanded(child: listArea),
-        const Divider(height: 1),
-        _inputBar(context),
-      ],
+    return PopScope(
+      // narrow (phone) layout: system back returns to the peer list
+      // instead of leaving the app
+      canPop: widget.onBack == null,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) widget.onBack?.call();
+      },
+      child: Column(
+        children: [
+          _header(context, peer.name, peer.id, online),
+          const Divider(height: 1),
+          Expanded(child: listArea),
+          const Divider(height: 1),
+          _inputBar(context),
+        ],
+      ),
     );
   }
 

@@ -12,7 +12,9 @@ class K {
   static const String multicastGroup = '224.0.0.198';
   static const int discoveryPort = 38701;
   static const Duration announceInterval = Duration(seconds: 3);
-  static const Duration offlineAfter = Duration(seconds: 10);
+  // generous on purpose: Android Wi-Fi power-save drops bursts of announces,
+  // a short window made phones flap offline mid-chat
+  static const Duration offlineAfter = Duration(seconds: 25);
 
   // transfer
   static const int tcpPort = 38702;
