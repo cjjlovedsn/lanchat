@@ -54,6 +54,8 @@ jobs:
           channel: stable
       - run: flutter pub get
       - run: flutter build apk --release
+      - name: Verify fixed Android release signature
+        run: python3 scripts/verify-android-signature.py
       - run: |
           mkdir -p dist
           cp build/app/outputs/flutter-apk/app-release.apk dist/lanchat-android.apk
@@ -75,6 +77,8 @@ jobs:
       - run: flutter pub get
       - name: Check first-launch installation hint
         run: test/macos_install_hint/run.sh
+      - name: Test Mac update replacement and rollback
+        run: python3 test/macos_updater_test.py
       - run: flutter build macos --release
       - name: Package DMG and ZIP
         run: scripts/package-macos-release.sh
@@ -97,6 +101,12 @@ jobs:
           files: artifacts/**/*
           generate_release_notes: true
           body: |
+            本版加入自动检查正式版本、更新提示和点击下载安装，包含下载进度、取消及 SHA256 校验。
+            窗口标题显示实际版本号；设置及桌面托盘菜单可手动检查更新。
+            Android 正式包使用固定发布证书，构建和安装前均检查签名；debug 版采用独立应用 ID。
+            如果手机已安装不同签名的旧版，需要先保留重要数据，再卸载旧版并重新安装一次；应用不会自动卸载旧版。
+            首次升级到支持应用内更新的版本仍需手动安装，后续版本可在应用中更新。
+
             macOS 推荐下载 lanchat-macos.dmg，打开后把应用拖入 Applications（应用程序），再从“应用程序”启动。
             lanchat-macos.zip 继续保留；同时提供 SHA256SUMS.txt 校验文件。
             首次从下载目录或 DMG 运行时，会显示移到“应用程序”的提示。

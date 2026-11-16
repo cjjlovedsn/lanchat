@@ -3,10 +3,12 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:provider/provider.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'core/config.dart';
+import 'core/app_updates.dart';
 import 'core/startup.dart';
 import 'core/constants.dart';
 import 'core/discovery.dart';
@@ -25,6 +27,15 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
   VideoPosters.enabled = true;
+  var windowTitle = K.appName;
+  var currentVersion = '';
+  try {
+    final info = await PackageInfo.fromPlatform();
+    currentVersion = info.version;
+    if (info.version.isNotEmpty) windowTitle = '${K.appName} v${info.version}';
+  } catch (_) {
+    // Metadata failure must not prevent chat or file transfer from starting.
+  }
   if (K.isDesktop) {
     await windowManager.ensureInitialized();
   }
@@ -33,6 +44,8 @@ Future<void> main() async {
   await startup.initialize();
   final store = await AppStore.create();
   final config = await Config.load(store.configFile);
+  final updates = AppUpdates(store: store, currentVersion: currentVersion)
+    ..start();
   final peers = PeersModel(store);
   await peers.start();
   final chats = ChatsModel(store);
@@ -79,16 +92,17 @@ Future<void> main() async {
     onStateChange: (s) {
       if (s == AppLifecycleState.resumed) {
         discovery.rejoinMulticast();
+        updates.check(automatic: true);
       }
     },
   );
 
   if (K.isDesktop) {
     await windowManager.waitUntilReadyToShow(
-      const WindowOptions(
-        size: Size(1020, 680),
-        minimumSize: Size(860, 560),
-        title: K.appName,
+      WindowOptions(
+        size: const Size(1020, 680),
+        minimumSize: const Size(860, 560),
+        title: windowTitle,
         center: true,
       ),
       () async {
@@ -122,6 +136,8 @@ Future<void> main() async {
       outbox: outbox,
       discovery: discovery,
       startup: startup,
+      windowTitle: windowTitle,
+      updates: updates,
     ),
   );
 }
@@ -135,6 +151,8 @@ class LanChatApp extends StatelessWidget {
   final Outbox outbox;
   final Discovery discovery;
   final StartupService startup;
+  final String windowTitle;
+  final AppUpdates updates;
 
   const LanChatApp({
     super.key,
@@ -146,6 +164,8 @@ class LanChatApp extends StatelessWidget {
     required this.outbox,
     required this.discovery,
     required this.startup,
+    this.windowTitle = K.appName,
+    required this.updates,
   });
 
   @override
@@ -153,6 +173,7 @@ class LanChatApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         Provider<AppStore>.value(value: store),
+        ChangeNotifierProvider<AppUpdates>.value(value: updates),
         ChangeNotifierProvider<StartupService>.value(value: startup),
         ChangeNotifierProvider<Discovery>.value(value: discovery),
         ChangeNotifierProvider<Config>.value(value: config),
@@ -163,7 +184,7 @@ class LanChatApp extends StatelessWidget {
       ],
       child: Consumer<Config>(
         builder: (context, settings, _) => MaterialApp(
-          title: K.appName,
+          title: windowTitle,
           debugShowCheckedModeBanner: false,
           theme: buildAppTheme(settings.accent, Brightness.light),
           darkTheme: buildAppTheme(settings.accent, Brightness.dark),

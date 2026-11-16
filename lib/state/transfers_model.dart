@@ -6,6 +6,8 @@ class TransfersModel extends ChangeNotifier {
   final Map<String, double> _progress = {};
   final Map<String, double> _lastNotify = {};
 
+  bool get hasActiveTransfers => _progress.isNotEmpty;
+
   double? of(String msgId) => _progress[msgId];
 
   void update(String msgId, double frac) {

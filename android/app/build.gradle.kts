@@ -1,5 +1,7 @@
 import java.io.FileInputStream
 import java.util.Properties
+import java.security.KeyStore
+import java.security.MessageDigest
 
 plugins {
     id("com.android.application")
@@ -10,7 +12,7 @@ plugins {
 
 // Committed release keystore (personal project): CI and local builds must
 // produce the same signature or Android refuses updates with a
-// "signature mismatch" error. Falls back to debug keys if absent.
+// "signature mismatch" error. Never silently sign a release with a debug key.
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
@@ -51,15 +53,44 @@ android {
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
         release {
-            signingConfig = if (keystorePropertiesFile.exists())
-                signingConfigs.getByName("release")
-            else
-                signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }
 
 flutter {
     source = "../.."
+}
+
+// Fail before packaging rather than distributing an APK signed by a temporary
+// per-machine key. Debug builds remain available without release credentials.
+tasks.matching { it.name == "validateSigningRelease" }.configureEach {
+    doFirst {
+        require(keystorePropertiesFile.isFile) {
+            "Missing android/key.properties. Release APKs must use the fixed LanChat release key."
+        }
+        listOf("keyAlias", "keyPassword", "storeFile", "storePassword").forEach { name ->
+            require(!keystoreProperties.getProperty(name).isNullOrBlank()) {
+                "Missing release signing property: $name"
+            }
+        }
+        val keyFile = file(keystoreProperties.getProperty("storeFile"))
+        require(keyFile.isFile) {
+            "Release keystore is missing. Do not generate a replacement key for an existing app."
+        }
+        val keys = KeyStore.getInstance(keyFile, keystoreProperties.getProperty("storePassword").toCharArray())
+        val certificate = keys.getCertificate(keystoreProperties.getProperty("keyAlias"))
+            ?: error("Release certificate is missing")
+        val fingerprint = MessageDigest.getInstance("SHA-256").digest(certificate.encoded)
+            .joinToString("") { "%02x".format(it) }
+        val expected = rootProject.file("release-certificate.sha256").readText().trim()
+        require(fingerprint == expected) {
+            "Release certificate changed. Do not distribute an APK that cannot update existing installations."
+        }
+    }
 }

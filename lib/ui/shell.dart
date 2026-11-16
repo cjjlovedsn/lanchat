@@ -7,6 +7,8 @@ import 'package:window_manager/window_manager.dart';
 
 import '../core/constants.dart';
 import '../core/startup.dart';
+import '../core/app_updates.dart';
+import 'widgets/update_dialog.dart';
 import '../state/chats_model.dart';
 import 'chat_view.dart';
 import 'peer_list.dart';
@@ -24,10 +26,35 @@ class _ShellPageState extends State<ShellPage>
   String? selectedPeerId;
   StartupService? _startup;
   String? _lastStartupError;
+  AppUpdates? _updates;
+  String? _announcedVersion;
+  bool _updateDialogOpen = false;
+
+  void _onUpdate() {
+    if (_updates?.shouldPrompt != true) return;
+    final version = _updates?.release?.version.toString();
+    if (!mounted ||
+        version == null ||
+        version == _announcedVersion ||
+        _updateDialogOpen) {
+      return;
+    }
+    _announcedVersion = version;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      _updateDialogOpen = true;
+      await showUpdateDialog(context);
+      _updateDialogOpen = false;
+    });
+  }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (_updates == null) {
+      _updates = context.read<AppUpdates>();
+      _updates!.addListener(_onUpdate);
+    }
     if (!K.isDesktop || _startup != null) return;
     _startup = context.read<StartupService>();
     _startup!.addListener(_startupChanged);
@@ -57,6 +84,7 @@ class _ShellPageState extends State<ShellPage>
         Menu(
           items: [
             MenuItem(key: 'show', label: '显示主界面'),
+            MenuItem(key: 'updates', label: '检查更新'),
             MenuItem.checkbox(
               key: 'startup',
               label: '开机启动',
@@ -83,6 +111,7 @@ class _ShellPageState extends State<ShellPage>
   @override
   void dispose() {
     _startup?.removeListener(_startupChanged);
+    _updates?.removeListener(_onUpdate);
     if (K.isDesktop) {
       windowManager.removeListener(this);
       trayManager.removeListener(this);
@@ -109,12 +138,23 @@ class _ShellPageState extends State<ShellPage>
   void onTrayMenuItemClick(MenuItem menuItem) {
     if (menuItem.key == 'show') {
       _show();
+    } else if (menuItem.key == 'updates') {
+      _show();
+      _manualUpdate();
     } else if (menuItem.key == 'startup') {
       final startup = _startup;
       if (startup != null) startup.setEnabled(!startup.enabled);
     } else if (menuItem.key == 'exit') {
       windowManager.destroy().then((_) => exit(0));
     }
+  }
+
+  Future<void> _manualUpdate() async {
+    if (_updateDialogOpen) return;
+    _updateDialogOpen = true;
+    await showUpdateDialog(context, check: true);
+    _announcedVersion = _updates?.release?.version.toString();
+    _updateDialogOpen = false;
   }
 
   void _show() async {

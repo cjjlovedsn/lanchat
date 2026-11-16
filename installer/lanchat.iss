@@ -3,7 +3,7 @@
 
 #define MyAppName "LanChat"
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0.8"
+  #define MyAppVersion "1.0.10"
 #endif
 #define MyAppExeName "lanchat.exe"
 

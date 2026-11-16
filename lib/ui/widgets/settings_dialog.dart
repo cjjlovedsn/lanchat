@@ -7,6 +7,8 @@ import 'package:provider/provider.dart';
 import '../../core/config.dart';
 import '../../core/constants.dart';
 import '../../core/startup.dart';
+import '../../core/app_updates.dart';
+import 'update_dialog.dart';
 import '../../core/storage_perm.dart';
 import '../../core/store.dart';
 import '../app_theme.dart';
@@ -70,6 +72,33 @@ Future<void> showSettingsDialog(BuildContext context) async {
                       onChanged: startup.busy ? null : startup.setEnabled,
                     ),
                   ),
+                Consumer<AppUpdates>(
+                  builder: (context, updates, _) => Column(
+                    children: [
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.system_update_alt_rounded),
+                        title: const Text('检查更新'),
+                        subtitle: Text('当前版本 v${updates.currentVersion}'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => showUpdateDialog(context, check: true),
+                      ),
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text(
+                          '自动检查新版本',
+                          style: TextStyle(fontSize: 14),
+                        ),
+                        subtitle: const Text(
+                          '仅检查并提示，点击更新后才下载安装',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                        value: updates.autoCheck,
+                        onChanged: updates.setAutoCheck,
+                      ),
+                    ],
+                  ),
+                ),
                 const Divider(),
                 const SizedBox(height: 14),
                 const Text(
