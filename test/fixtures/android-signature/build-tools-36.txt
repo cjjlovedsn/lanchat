@@ -1,0 +1,4 @@
+Signer #1 certificate DN: CN=LanChat, OU=Personal, O=LanChat, L=Local, ST=Local, C=CN
+Signer #1 certificate SHA-256 digest: d529317e51be5d28b3a4edaf5f2f85ae44cdab761113afbeb6c8082d103d3ce4
+Signer #1 certificate SHA-1 digest: 86da42a3efef8796f745a613d02d0b3d3d5deed0
+Signer #1 certificate MD5 digest: fcff03739e196e0ad39409a4c571ccf1
