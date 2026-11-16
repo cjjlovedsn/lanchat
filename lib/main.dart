@@ -53,7 +53,19 @@ Future<void> main() async {
   );
   await server.start();
 
-  final discovery = Discovery(cfg: config, peers: peers);
+  final discovery = Discovery(
+    cfg: config,
+    peers: peers,
+    onDiagnostic: (line) {
+      try {
+        final log = File('${store.base.path}/network.log');
+        if (log.existsSync() && log.lengthSync() > 128 * 1024) {
+          log.writeAsStringSync('');
+        }
+        log.writeAsStringSync('$line\n', mode: FileMode.append);
+      } catch (_) {}
+    },
+  );
   await discovery.start();
   outbox.startRetry();
 
@@ -62,7 +74,6 @@ Future<void> main() async {
   AppLifecycleListener(
     onStateChange: (s) {
       if (s == AppLifecycleState.resumed) {
-        discovery.announceNow();
         discovery.rejoinMulticast();
       }
     },
@@ -91,6 +102,7 @@ Future<void> main() async {
       chats: chats,
       transfers: transfers,
       outbox: outbox,
+      discovery: discovery,
     ),
   );
 
@@ -117,6 +129,7 @@ class LanChatApp extends StatelessWidget {
   final ChatsModel chats;
   final TransfersModel transfers;
   final Outbox outbox;
+  final Discovery discovery;
 
   const LanChatApp({
     super.key,
@@ -126,6 +139,7 @@ class LanChatApp extends StatelessWidget {
     required this.chats,
     required this.transfers,
     required this.outbox,
+    required this.discovery,
   });
 
   @override
@@ -133,6 +147,7 @@ class LanChatApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         Provider<AppStore>.value(value: store),
+        ChangeNotifierProvider<Discovery>.value(value: discovery),
         ChangeNotifierProvider<Config>.value(value: config),
         ChangeNotifierProvider<PeersModel>.value(value: peers),
         ChangeNotifierProvider<ChatsModel>.value(value: chats),

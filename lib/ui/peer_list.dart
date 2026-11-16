@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/util.dart';
+import '../core/discovery.dart';
+import 'widgets/network_status.dart';
 import '../models/peer.dart';
 import '../state/chats_model.dart';
 import '../state/peers_model.dart';
@@ -68,6 +70,7 @@ class PeerListPanel extends StatelessWidget {
     final chats = context.watch<ChatsModel>();
     final cfg = context.watch<Config>();
     final list = peers.sorted;
+    final discovery = context.watch<Discovery?>();
 
     return Column(
       children: [
@@ -86,6 +89,17 @@ class PeerListPanel extends StatelessWidget {
                 style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
               ),
               const Spacer(),
+              if (discovery != null)
+                IconButton(
+                  icon: Icon(
+                    discovery.ready && discovery.lastError == null
+                        ? Icons.wifi
+                        : Icons.wifi_off,
+                    size: 20,
+                  ),
+                  tooltip: '网络诊断',
+                  onPressed: () => showNetworkStatus(context, discovery),
+                ),
               IconButton(
                 icon: const Icon(Icons.settings_outlined, size: 20),
                 tooltip: '设置',
@@ -95,6 +109,16 @@ class PeerListPanel extends StatelessWidget {
           ),
         ),
         const Divider(height: 1),
+        if (discovery != null && discovery.lastError != null)
+          Material(
+            color: Theme.of(context).colorScheme.errorContainer,
+            child: ListTile(
+              dense: true,
+              title: const Text('自动发现异常，正在重试', style: TextStyle(fontSize: 12)),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => showNetworkStatus(context, discovery),
+            ),
+          ),
         Expanded(
           child: list.isEmpty
               ? const Center(
