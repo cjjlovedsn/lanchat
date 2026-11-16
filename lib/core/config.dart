@@ -58,7 +58,11 @@ class Config extends ChangeNotifier {
         orElse: () => AppAccent.ocean,
       ),
     );
-    await cfg.save();
+    // Normalization save only; a transient lock (AV scan, low-integrity
+    // sandbox) must not abort main() and leave a windowless zombie process.
+    try {
+      await cfg.save();
+    } catch (_) {}
     return cfg;
   }
 

@@ -32,7 +32,13 @@ class _ComposerFixture {
       store = await AppStore.open(dir);
       config = await Config.load(store.configFile);
     });
-    addTearDown(() => dir.deleteSync(recursive: true));
+    // Paste-triggered file IO can still hold a handle when the fake-async
+    // test body ends (Windows locks open files), so deletion is best-effort.
+    addTearDown(() {
+      try {
+        dir.deleteSync(recursive: true);
+      } catch (_) {}
+    });
     final peers = PeersModel(store)
       ..upsertFromAnnounce(
         id: 'peer',
@@ -148,6 +154,11 @@ void main() {
       final imageBytes = File(
         'assets/brand/lanchat_icon.png',
       ).readAsBytesSync();
+      // The Windows pasteboard plugin hands the image over as a temp file
+      // path that the Dart side reads and deletes; other platforms get bytes.
+      final imageFile = File(
+        '${store.base.path}/pasted-image.bin',
+      )..writeAsBytesSync(imageBytes);
       var mode = 'files';
       const native = MethodChannel('lanchat/clipboard');
       const pasteboard = MethodChannel('pasteboard');
@@ -162,7 +173,7 @@ void main() {
           return mode == 'files' ? [file.path] : <String>[];
         }
         if (call.method == 'image' && mode == 'image') {
-          return imageBytes;
+          return Platform.isWindows ? imageFile.path : imageBytes;
         }
         return null;
       });
