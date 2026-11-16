@@ -3,10 +3,12 @@ import 'dart:io';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
 
 import '../core/config.dart';
+import '../core/message_text.dart';
 import '../core/outbox.dart';
 import '../core/storage_perm.dart';
 import '../core/store.dart';
@@ -29,6 +31,8 @@ class _ChatViewState extends State<ChatView> {
   final _input = TextEditingController();
   final _scroll = ScrollController();
   bool _dragging = false;
+  bool _codeMode = false;
+  bool _savingText = false;
   int _lastCount = 0;
   final Set<String> _selected = {};
   bool _selecting = false;
@@ -41,9 +45,9 @@ class _ChatViewState extends State<ChatView> {
   }
 
   void _exitSelecting() => setState(() {
-        _selecting = false;
-        _selected.clear();
-      });
+    _selecting = false;
+    _selected.clear();
+  });
 
   Future<void> _deleteMessages(Set<String> ids) async {
     if (ids.isEmpty) return;
@@ -60,8 +64,14 @@ class _ChatViewState extends State<ChatView> {
         title: Text('删除 $n 条消息？'),
         content: const Text('仅删除本机聊天记录，不影响对方设备；已接收的文件仍保留在下载目录。'),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('取消')),
-          FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('删除')),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('删除'),
+          ),
         ],
       ),
     );
@@ -84,10 +94,18 @@ class _ChatViewState extends State<ChatView> {
         context: context,
         builder: (ctx) => AlertDialog(
           title: const Text('需要授权'),
-          content: const Text('保存到公共目录需要「所有文件访问」权限。\n去系统设置里为 LanChat 开启后，重新操作即可。'),
+          content: const Text(
+            '保存到公共目录需要「所有文件访问」权限。\n去系统设置里为 LanChat 开启后，重新操作即可。',
+          ),
           actions: [
-            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('取消')),
-            FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('去设置')),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('去设置'),
+            ),
           ],
         ),
       );
@@ -109,18 +127,25 @@ class _ChatViewState extends State<ChatView> {
       await File(src).copy(target.path);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('已保存到 ${target.path}'), duration: const Duration(seconds: 2)),
+        SnackBar(
+          content: Text('已保存到 ${target.path}'),
+          duration: const Duration(seconds: 2),
+        ),
       );
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: const Text('保存失败：目录不可写'), duration: const Duration(seconds: 2)),
+        SnackBar(
+          content: const Text('保存失败：目录不可写'),
+          duration: const Duration(seconds: 2),
+        ),
       );
     }
   }
 
   Future<void> _showMsgMenu(ChatMessage msg, Offset globalPos) async {
-    final canSave = msg.kind == MsgKind.file &&
+    final canSave =
+        msg.kind == MsgKind.file &&
         msg.filePath != null &&
         File(msg.filePath!).existsSync();
     String? action;
@@ -152,7 +177,8 @@ class _ChatViewState extends State<ChatView> {
         ),
       );
     } else {
-      final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+      final overlay =
+          Overlay.of(context).context.findRenderObject() as RenderBox;
       action = await showMenu<String>(
         context: context,
         position: RelativeRect.fromLTRB(
@@ -164,7 +190,11 @@ class _ChatViewState extends State<ChatView> {
         items: [
           const PopupMenuItem(value: 'delete', height: 40, child: Text('删除该条')),
           if (canSave)
-            const PopupMenuItem(value: 'save', height: 40, child: Text('保存到指定目录')),
+            const PopupMenuItem(
+              value: 'save',
+              height: 40,
+              child: Text('保存到指定目录'),
+            ),
           const PopupMenuItem(value: 'select', height: 40, child: Text('多选')),
         ],
       );
@@ -189,19 +219,49 @@ class _ChatViewState extends State<ChatView> {
   }
 
   void _send() {
-    final text = _input.text.trim();
-    if (text.isEmpty) return;
-    context.read<Outbox>().sendText(widget.peerId, text);
-    _input.clear();
+    if (_savingText) return;
+    final text = _input.text;
+    if (text.trim().isEmpty) return;
+    _sendText(text);
+  }
+
+  Future<void> _sendText(String text) async {
+    setState(() => _savingText = true);
+    try {
+      await context.read<Outbox>().sendText(
+        widget.peerId,
+        _codeMode ? encodeCode(text) : text,
+      );
+      if (mounted && _input.text == text) _input.clear();
+    } catch (_) {
+      if (mounted) _showError('消息保存失败，请重试');
+    } finally {
+      if (mounted) setState(() => _savingText = false);
+    }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _queueFile(Outbox outbox, String peerId, String path) async {
+    try {
+      await outbox.sendFile(peerId, path);
+    } catch (error) {
+      if (mounted) _showError('无法发送 ${p.basename(path)}：$error');
+    }
   }
 
   Future<void> _pickFiles() async {
     final outbox = context.read<Outbox>();
+    final peerId = widget.peerId;
     final res = await FilePicker.pickFiles(allowMultiple: true);
     if (res == null) return;
     for (final f in res.files) {
       final path = f.path;
-      if (path != null) await outbox.sendFile(widget.peerId, path);
+      if (path != null) await _queueFile(outbox, peerId, path);
     }
   }
 
@@ -212,10 +272,15 @@ class _ChatViewState extends State<ChatView> {
     final outbox = context.watch<Outbox>();
     final peer = peers.byId(widget.peerId);
     if (peer == null) {
-      return const Center(child: Text('该设备已从列表移除', style: TextStyle(color: Colors.grey)));
+      return const Center(
+        child: Text('该设备已从列表移除', style: TextStyle(color: Colors.grey)),
+      );
     }
     final online = peers.isOnline(peer.id);
-    final msgs = mergedChatView(chats.historyFor(peer.id), outbox.viewFor(peer.id));
+    final msgs = mergedChatView(
+      chats.historyFor(peer.id),
+      outbox.viewFor(peer.id),
+    );
     if (msgs.length > _lastCount) {
       _lastCount = msgs.length;
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
@@ -234,10 +299,14 @@ class _ChatViewState extends State<ChatView> {
         if (_dragging)
           Positioned.fill(
             child: Container(
-              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.08),
+              color: Theme.of(
+                context,
+              ).colorScheme.primary.withValues(alpha: 0.08),
               child: const Center(
-                child: Text('松开即发送',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                child: Text(
+                  '松开即发送',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
               ),
             ),
           ),
@@ -251,7 +320,7 @@ class _ChatViewState extends State<ChatView> {
           setState(() => _dragging = false);
           final ob = context.read<Outbox>();
           for (final f in details.files) {
-            ob.sendFile(widget.peerId, f.path);
+            _queueFile(ob, widget.peerId, f.path);
           }
         },
         child: listArea,
@@ -284,7 +353,9 @@ class _ChatViewState extends State<ChatView> {
       return GestureDetector(
         // absorb pointer events so taps anywhere on the row toggle selection
         // instead of reaching the (selectable) text or image
-        onTap: () => setState(() => sel ? _selected.remove(msg.id) : _selected.add(msg.id)),
+        onTap: () => setState(
+          () => sel ? _selected.remove(msg.id) : _selected.add(msg.id),
+        ),
         child: AbsorbPointer(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
@@ -292,7 +363,9 @@ class _ChatViewState extends State<ChatView> {
               Icon(
                 sel ? Icons.check_circle : Icons.radio_button_unchecked,
                 size: 20,
-                color: sel ? Theme.of(context).colorScheme.primary : Colors.grey,
+                color: sel
+                    ? Theme.of(context).colorScheme.primary
+                    : Colors.grey,
               ),
               const SizedBox(width: 6),
               Expanded(child: bubble),
@@ -308,7 +381,12 @@ class _ChatViewState extends State<ChatView> {
     );
   }
 
-  Widget _header(BuildContext context, String name, String peerId, bool online) {
+  Widget _header(
+    BuildContext context,
+    String name,
+    String peerId,
+    bool online,
+  ) {
     if (_selecting) {
       return Container(
         height: 58,
@@ -320,11 +398,15 @@ class _ChatViewState extends State<ChatView> {
               tooltip: '取消',
               onPressed: _exitSelecting,
             ),
-            Text('已选 ${_selected.length} 条',
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+            Text(
+              '已选 ${_selected.length} 条',
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+            ),
             const Spacer(),
             TextButton(
-              onPressed: _selected.isEmpty ? null : () => setState(() => _selected.clear()),
+              onPressed: _selected.isEmpty
+                  ? null
+                  : () => setState(() => _selected.clear()),
               child: const Text('全不选'),
             ),
             const SizedBox(width: 4),
@@ -351,10 +433,12 @@ class _ChatViewState extends State<ChatView> {
             const SizedBox(width: 4),
           ],
           Flexible(
-            child: Text(name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            child: Text(
+              name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            ),
           ),
           const SizedBox(width: 10),
           Container(
@@ -364,7 +448,7 @@ class _ChatViewState extends State<ChatView> {
               borderRadius: BorderRadius.circular(4),
             ),
             child: Text(
-              online ? '在线' : '离线，消息将在对方上线后送达',
+              online ? '在线' : '离线，待上线送达',
               style: TextStyle(
                 fontSize: 11,
                 color: online ? const Color(0xFF2F9E44) : Colors.grey,
@@ -377,9 +461,9 @@ class _ChatViewState extends State<ChatView> {
               icon: const Icon(Icons.folder_open_outlined, size: 20),
               tooltip: '打开下载目录',
               onPressed: () {
-                final dir = context
-                    .read<Config>()
-                    .effectiveDownloadDir(context.read<AppStore>());
+                final dir = context.read<Config>().effectiveDownloadDir(
+                  context.read<AppStore>(),
+                );
                 revealInFolder(dir.path);
               },
             ),
@@ -398,21 +482,44 @@ class _ChatViewState extends State<ChatView> {
             tooltip: '选择文件',
             onPressed: _pickFiles,
           ),
+          IconButton(
+            icon: const Icon(Icons.code),
+            isSelected: _codeMode,
+            tooltip: _codeMode ? '切换为普通文字' : '切换为代码消息',
+            onPressed: () => setState(() => _codeMode = !_codeMode),
+          ),
           const SizedBox(width: 4),
           Expanded(
-            child: TextField(
-              controller: _input,
-              textInputAction: TextInputAction.send,
-              onSubmitted: (_) => _send(),
-              decoration: InputDecoration(
-                hintText: Platform.isAndroid
-                    ? '输入消息'
-                    : '输入消息，Enter 发送；可直接拖入文件',
-                isDense: true,
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
+            child: CallbackShortcuts(
+              bindings: {
+                const SingleActivator(LogicalKeyboardKey.enter, control: true):
+                    _send,
+                const SingleActivator(LogicalKeyboardKey.enter, meta: true):
+                    _send,
+              },
+              child: TextField(
+                controller: _input,
+                minLines: 1,
+                maxLines: 8,
+                keyboardType: TextInputType.multiline,
+                textInputAction: TextInputAction.newline,
+                style: _codeMode
+                    ? const TextStyle(fontFamily: 'monospace')
+                    : null,
+                decoration: InputDecoration(
+                  hintText: Platform.isAndroid
+                      ? (_codeMode ? '粘贴代码，保留缩进' : '输入消息，回车换行')
+                      : (_codeMode
+                            ? '粘贴代码，⌘/Ctrl+Enter 发送'
+                            : '输入消息，回车换行，⌘/Ctrl+Enter 发送'),
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 11,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
               ),
             ),
@@ -421,7 +528,7 @@ class _ChatViewState extends State<ChatView> {
           IconButton.filled(
             icon: const Icon(Icons.send, size: 18),
             tooltip: '发送',
-            onPressed: _send,
+            onPressed: _savingText ? null : _send,
           ),
         ],
       ),

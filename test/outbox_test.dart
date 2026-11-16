@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lanchat/core/outbox.dart';
@@ -15,6 +16,7 @@ class FakeSession implements OutboundSession {
   final bool refuseAll;
   final bool failOnAcks;
   Object? failOnSendAt; // String text that should make sendText throw
+  Future<void> Function()? beforeAck;
   final List<String> sentTexts = [];
   final List<String> sentFileNames = [];
 
@@ -25,29 +27,34 @@ class FakeSession implements OutboundSession {
   });
 
   @override
-  Future<void> sendText(
-      {required String msgId, required String text, required int tsMs}) async {
+  Future<void> sendText({
+    required String msgId,
+    required String text,
+    required int tsMs,
+  }) async {
     if (text == failOnSendAt) throw const SocketException('send failed');
     sentTexts.add(text);
   }
 
   @override
-  Future<void> sendFile(
-      {required String msgId,
-      required String name,
-      required String path,
-      required int tsMs,
-      required void Function(double) onProgress}) async {
+  Future<void> sendFile({
+    required String msgId,
+    required String name,
+    required String path,
+    required int tsMs,
+    required void Function(double) onProgress,
+  }) async {
     sentFileNames.add(name);
     onProgress(1);
   }
 
   @override
   Future<Map<String, SendReport>> collectAcks(Set<String> msgIds) async {
+    await beforeAck?.call();
     if (failOnAcks) throw const SocketException('connection lost');
     return {
       for (final id in msgIds)
-        id: SendReport(id, !refuseAll, reason: refuseAll ? 'declined' : null)
+        id: SendReport(id, !refuseAll, reason: refuseAll ? 'declined' : null),
     };
   }
 
@@ -80,14 +87,18 @@ class Fixture {
       transfers: transfers,
       opener: (Peer peer) async {
         if (connectFails) return null;
-        return sessionFactory?.call() ??
-            FakeSession();
+        return sessionFactory?.call() ?? FakeSession();
       },
     );
     chats.attachPending(outbox);
     if (peerOnline) {
       peers.upsertFromAnnounce(
-          id: 'peerA', name: 'A', platform: 'windows', port: 1, address: '1.2.3.4');
+        id: 'peerA',
+        name: 'A',
+        platform: 'windows',
+        port: 1,
+        address: '1.2.3.4',
+      );
     }
     return Fixture(store, peers, chats, outbox);
   }
@@ -117,6 +128,75 @@ void main() {
     expect(f.store.outboxFile('peerA').existsSync(), isFalse);
   });
 
+  test(
+    'messages enqueued while awaiting ack survive and flush immediately',
+    () async {
+      final entered = Completer<void>();
+      final release = Completer<void>();
+      final first = FakeSession()
+        ..beforeAck = () async {
+          if (!entered.isCompleted) entered.complete();
+          await release.future;
+        };
+      final second = FakeSession();
+      var calls = 0;
+      final f = await Fixture.create(
+        sessionFactory: () => calls++ == 0 ? first : second,
+      );
+      await f.outbox.sendText('peerA', 'first');
+      await entered.future;
+      await f.outbox.sendText('peerA', 'during transfer');
+      release.complete();
+      await f.drain('peerA');
+      expect(f.chats.historyFor('peerA').map((m) => m.text), [
+        'first',
+        'during transfer',
+      ]);
+      expect(second.sentTexts, ['during transfer']);
+      expect(f.outbox.viewFor('peerA'), isEmpty);
+    },
+  );
+
+  test('deleting an in-flight message does not resurrect it on ack', () async {
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    final fake = FakeSession()
+      ..beforeAck = () async {
+        entered.complete();
+        await release.future;
+      };
+    final f = await Fixture.create(sessionFactory: () => fake);
+    await f.outbox.sendText('peerA', 'delete me');
+    await entered.future;
+    final id = f.outbox.viewFor('peerA').single.id;
+    await f.outbox.remove('peerA', {id});
+    release.complete();
+    await f.drain('peerA');
+    expect(f.chats.historyFor('peerA'), isEmpty);
+  });
+
+  test(
+    'an acknowledged message stays delivered when a later send fails',
+    () async {
+      final f = await Fixture.create(peerOnline: false);
+      await f.outbox.sendText('peerA', 'good');
+      await f.outbox.sendText('peerA', 'bad');
+      final fake = FakeSession()..failOnSendAt = 'bad';
+      f.outbox.opener = (_) async => fake;
+      f.peers.upsertFromAnnounce(
+        id: 'peerA',
+        name: 'A',
+        platform: 'macos',
+        port: 1,
+        address: '1.2.3.4',
+      );
+      await f.outbox.flushPeer('peerA');
+      expect(f.chats.historyFor('peerA').single.text, 'good');
+      expect(f.outbox.viewFor('peerA').single.text, 'bad');
+      expect(f.outbox.viewFor('peerA').single.state, SendState.pending);
+    },
+  );
+
   test('queue survives reload from disk while pending', () async {
     // connect fails so the message stays queued on disk
     var f = await Fixture.create(connectFails: true);
@@ -127,18 +207,28 @@ void main() {
     final peers2 = PeersModel(f.store);
     final chats2 = ChatsModel(f.store);
     await chats2.load();
-    f = Fixture(f.store, peers2, chats2,
-        Outbox(store: f.store, peers: peers2, chats: chats2, transfers: TransfersModel(), opener: (p) async => null));
+    f = Fixture(
+      f.store,
+      peers2,
+      chats2,
+      Outbox(
+        store: f.store,
+        peers: peers2,
+        chats: chats2,
+        transfers: TransfersModel(),
+        opener: (p) async => null,
+      ),
+    );
     expect(f.outbox.viewFor('peerA').length, 1);
     expect(f.outbox.viewFor('peerA').first.text, 'offline msg');
   });
 
   test('declined file is refused and blob cleaned up', () async {
     final f = await Fixture.create(
-        sessionFactory: () => FakeSession(refuseAll: true));
-    final src =
-        File('${f.store.base.path}${Platform.pathSeparator}hello.txt')
-          ..writeAsStringSync('hi');
+      sessionFactory: () => FakeSession(refuseAll: true),
+    );
+    final src = File('${f.store.base.path}${Platform.pathSeparator}hello.txt')
+      ..writeAsStringSync('hi');
     await f.outbox.sendFile('peerA', src.path);
     await f.drain('peerA');
 
@@ -162,7 +252,8 @@ void main() {
 
   test('ack loss keeps items pending (resend-safe)', () async {
     final f = await Fixture.create(
-        sessionFactory: () => FakeSession(failOnAcks: true));
+      sessionFactory: () => FakeSession(failOnAcks: true),
+    );
     await f.outbox.sendText('peerA', 'will-not-ack');
     await f.drain('peerA');
     expect(f.outbox.viewFor('peerA').length, 1);
@@ -172,9 +263,8 @@ void main() {
   test('file delivers, records source path, blob removed', () async {
     final fake = FakeSession();
     final f = await Fixture.create(sessionFactory: () => fake);
-    final src =
-        File('${f.store.base.path}${Platform.pathSeparator}code.dart')
-          ..writeAsStringSync('void main() {}');
+    final src = File('${f.store.base.path}${Platform.pathSeparator}code.dart')
+      ..writeAsStringSync('void main() {}');
     await f.outbox.sendFile('peerA', src.path);
     await f.drain('peerA');
 
@@ -190,10 +280,28 @@ void main() {
 
   test('deleteFor rewrites history and drops only the named ids', () async {
     final f = await Fixture.create(connectFails: true); // stays pending
-    f.chats.onIncoming('peerA',
-        ChatMessage(id: 'in1', outgoing: false, kind: MsgKind.text, text: 'a', ts: DateTime.now(), state: SendState.received));
-    f.chats.onIncoming('peerA',
-        ChatMessage(id: 'in2', outgoing: false, kind: MsgKind.text, text: 'b', ts: DateTime.now(), state: SendState.received));
+    f.chats.onIncoming(
+      'peerA',
+      ChatMessage(
+        id: 'in1',
+        outgoing: false,
+        kind: MsgKind.text,
+        text: 'a',
+        ts: DateTime.now(),
+        state: SendState.received,
+      ),
+    );
+    f.chats.onIncoming(
+      'peerA',
+      ChatMessage(
+        id: 'in2',
+        outgoing: false,
+        kind: MsgKind.text,
+        text: 'b',
+        ts: DateTime.now(),
+        state: SendState.received,
+      ),
+    );
     await f.outbox.sendText('peerA', 'queued');
     final pendingId = f.outbox.viewFor('peerA').first.id;
     await f.drain('peerA');

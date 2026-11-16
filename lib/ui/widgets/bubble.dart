@@ -7,6 +7,9 @@ import '../../core/util.dart';
 import '../../models/message.dart';
 import '../../state/transfers_model.dart';
 import 'image_viewer.dart';
+import 'message_text.dart';
+import 'video_viewer.dart';
+import 'video_poster.dart';
 
 class MessageBubble extends StatelessWidget {
   final ChatMessage msg;
@@ -38,13 +41,9 @@ class MessageBubble extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (msg.kind == MsgKind.text)
-              SelectableText(
-                msg.text ?? '',
-                style: TextStyle(
-                  fontSize: 14,
-                  height: 1.45,
-                  color: out ? Colors.white : scheme.onSurface,
-                ),
+              MessageText(
+                text: msg.text ?? '',
+                color: out ? Colors.white : scheme.onSurface,
               )
             else
               FileCard(msg: msg),
@@ -60,7 +59,9 @@ class MessageBubble extends StatelessWidget {
     final List<Widget> children = [
       Text(formatClock(msg.ts), style: TextStyle(fontSize: 10.5, color: color)),
     ];
-    if (!msg.outgoing) return Row(mainAxisSize: MainAxisSize.min, children: children);
+    if (!msg.outgoing) {
+      return Row(mainAxisSize: MainAxisSize.min, children: children);
+    }
 
     switch (msg.state) {
       case SendState.pending:
@@ -87,8 +88,10 @@ class MessageBubble extends StatelessWidget {
           else
             Icon(Icons.schedule, size: 12, color: color),
           const SizedBox(width: 4),
-          Text(p != null ? '${(p * 100).round()}%' : '传输中',
-              style: TextStyle(fontSize: 10.5, color: color)),
+          Text(
+            p != null ? '${(p * 100).round()}%' : '传输中',
+            style: TextStyle(fontSize: 10.5, color: color),
+          ),
         ]);
       case SendState.delivered:
         children.addAll([
@@ -126,19 +129,51 @@ class FileCard extends StatelessWidget {
   static IconData _iconFor(String? name) {
     final ext = (name ?? '').split('.').last.toLowerCase();
     switch (ext) {
-      case 'zip': case 'rar': case '7z': case 'tar': case 'gz':
+      case 'zip':
+      case 'rar':
+      case '7z':
+      case 'tar':
+      case 'gz':
         return Icons.folder_zip_outlined;
-      case 'png': case 'jpg': case 'jpeg': case 'gif': case 'webp': case 'bmp':
+      case 'png':
+      case 'jpg':
+      case 'jpeg':
+      case 'gif':
+      case 'webp':
+      case 'bmp':
         return Icons.image_outlined;
-      case 'mp3': case 'wav': case 'flac': case 'm4a':
+      case 'mp3':
+      case 'wav':
+      case 'flac':
+      case 'm4a':
         return Icons.audio_file_outlined;
-      case 'mp4': case 'mkv': case 'mov': case 'avi':
+      case 'mp4':
+      case 'mkv':
+      case 'mov':
+      case 'avi':
         return Icons.movie_outlined;
-      case 'exe': case 'msi': case 'dmg': case 'apk':
+      case 'exe':
+      case 'msi':
+      case 'dmg':
+      case 'apk':
         return Icons.apps;
-      case 'dart': case 'java': case 'py': case 'js': case 'ts': case 'json':
-      case 'xml': case 'html': case 'css': case 'c': case 'cpp': case 'h':
-      case 'cs': case 'go': case 'rs': case 'txt': case 'md':
+      case 'dart':
+      case 'java':
+      case 'py':
+      case 'js':
+      case 'ts':
+      case 'json':
+      case 'xml':
+      case 'html':
+      case 'css':
+      case 'c':
+      case 'cpp':
+      case 'h':
+      case 'cs':
+      case 'go':
+      case 'rs':
+      case 'txt':
+      case 'md':
         return Icons.description_outlined;
       default:
         return Icons.insert_drive_file_outlined;
@@ -153,7 +188,9 @@ class FileCard extends StatelessWidget {
     final ext = _extOf(msg.fileName);
     final isImage = _imageExt.contains(ext);
     final isVideo = _videoExt.contains(ext);
-    final dark = msg.outgoing ? Colors.white : Theme.of(context).colorScheme.onSurface;
+    final dark = msg.outgoing
+        ? Colors.white
+        : Theme.of(context).colorScheme.onSurface;
     final sub = msg.outgoing ? Colors.white70 : Colors.grey;
 
     String hint;
@@ -180,10 +217,20 @@ class FileCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
           ),
           child: isVideo
-              ? Icon(Icons.play_circle_fill,
+              ? Icon(
+                  Icons.movie_outlined,
                   size: 24,
-                  color: msg.outgoing ? Colors.white : Theme.of(context).colorScheme.primary)
-              : Icon(_iconFor(msg.fileName), size: 22, color: msg.outgoing ? Colors.white : Theme.of(context).colorScheme.primary),
+                  color: msg.outgoing
+                      ? Colors.white
+                      : Theme.of(context).colorScheme.primary,
+                )
+              : Icon(
+                  _iconFor(msg.fileName),
+                  size: 22,
+                  color: msg.outgoing
+                      ? Colors.white
+                      : Theme.of(context).colorScheme.primary,
+                ),
         ),
         const SizedBox(width: 10),
         Flexible(
@@ -210,11 +257,18 @@ class FileCard extends StatelessWidget {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.delete_outline, size: 12, color: Colors.orange.shade700),
+                    Icon(
+                      Icons.delete_outline,
+                      size: 12,
+                      color: Colors.orange.shade700,
+                    ),
                     const SizedBox(width: 3),
                     Text(
                       '文件已被清理或移动',
-                      style: TextStyle(fontSize: 11, color: Colors.orange.shade700),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.orange.shade700,
+                      ),
                     ),
                   ],
                 ),
@@ -244,8 +298,22 @@ class FileCard extends StatelessWidget {
 
     if (!hasLocal) return card;
     return InkWell(
-      onTap: () => isVideo ? openDirect(path) : openOrReveal(path),
-      child: card,
+      onTap: () => isVideo
+          ? showVideoViewer(context, path, msg.fileName ?? '视频')
+          : openOrReveal(path),
+      child: isVideo
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: VideoPoster(path: path),
+                ),
+                card,
+              ],
+            )
+          : card,
     );
   }
 }

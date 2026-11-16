@@ -95,3 +95,13 @@ git push origin v1.0.0
 - 传输：TCP `38702`，帧格式 `[u32 jsonLen][header JSON][u32 payloadLen][payload]`；每连接先 `hello`，随后若干 `text` / `file` 帧（文件为流式 payload + sha256 校验），逐条 `ack` 确认后才出队，未确认的崩溃后可安全重发（按 msgId 去重）
 - 数据目录：Windows `%LOCALAPPDATA%\local.lanchat.lanchat`，macOS `~/Library/Application Support/local.lanchat.lanchat`，Android 应用私有目录（可用 `LANCHAT_INSTANCE` 环境变量隔离，用于同机多开测试）
 - 安卓差异：窗口/托盘/拖拽仅桌面端；竖屏手机为单栏布局（列表↔聊天）；UDP 多播需持 MulticastLock（MainActivity 已处理）；点击收到的文件用系统查看器打开（open_filex）
+
+## 聊天与媒体
+
+- 输入框支持多行，回车换行，桌面使用 Ctrl+Enter / Cmd+Enter 发送。
+- 点击输入框旁的代码按钮切换代码消息，保留缩进和空行；代码气泡支持横向滚动和一键复制原文。
+- 普通文字中的 HTTP/HTTPS 和 www 链接可点击，在外部浏览器打开。
+- 视频气泡点击后进入应用内播放器，支持进度控制和全屏；无法播放时可切换到系统播放器。不会自动播放聊天列表中的视频。
+- 当前协议单文件必须小于 4 GiB；更大的文件请先拆分。文件读取失败会显示提示。
+- 传输按消息逐条确认；未确认或校验失败的消息保留在离线发件箱等待重试。
+- 视频播放使用 media_kit 原生解码库，因此安装包体积会有所增加。

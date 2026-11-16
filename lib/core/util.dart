@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:open_filex/open_filex.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 String formatSize(int bytes) {
   if (bytes < 1024) return '$bytes B';
@@ -48,17 +49,21 @@ Future<void> openOrReveal(String path) async {
 }
 
 /// Open a file with the system default application (video playback etc.).
-Future<void> openDirect(String path) async {
+Future<bool> openDirect(String path) async {
   try {
     if (Platform.isAndroid) {
-      await OpenFilex.open(path);
+      return (await OpenFilex.open(path)).type == ResultType.done;
     } else if (Platform.isWindows) {
-      // 'start' treats a first quoted arg as the window title, hence the ''
-      await Process.run('cmd.exe', ['/c', 'start', '', path]);
+      return await launchUrl(
+        Uri.file(path, windows: true),
+        mode: LaunchMode.externalApplication,
+      );
     } else {
-      await Process.run('open', [path]);
+      return (await Process.run('open', [path])).exitCode == 0;
     }
-  } catch (_) {}
+  } catch (_) {
+    return false;
+  }
 }
 
 /// Strip characters that are illegal in file names on Windows/macOS.

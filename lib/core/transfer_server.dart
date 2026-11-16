@@ -39,7 +39,7 @@ class TransferServer {
       final port = cfg.tcpPort + i;
       try {
         _srv = await ServerSocket.bind(InternetAddress.anyIPv4, port);
-        cfg.tcpPort = port;
+        cfg.tcpPort = _srv!.port;
         await cfg.save();
         lastError = null;
         break;
@@ -60,9 +60,13 @@ class TransferServer {
   Future<void> _handle(Socket sock) async {
     final reader = FrameReader(sock);
     String? peerId;
+    File? unfinished;
+    String? progressId;
     try {
       while (true) {
-        final h = await reader.readHeader(timeout: const Duration(seconds: 120));
+        final h = await reader.readHeader(
+          timeout: const Duration(seconds: 120),
+        );
         final type = h.header['type'] as String?;
 
         if (type == 'hello') {
@@ -79,8 +83,10 @@ class TransferServer {
         } else if (type == 'text' && peerId != null) {
           final msgId = h.header['msgId'] as String?;
           if (msgId == null) break;
-          final payload =
-              await reader.readPayload(h.payloadLen, timeout: const Duration(seconds: 30));
+          final payload = await reader.readPayload(
+            h.payloadLen,
+            timeout: const Duration(seconds: 30),
+          );
           final text = utf8.decode(payload, allowMalformed: true);
           chats.onIncoming(
             peerId,
@@ -97,9 +103,20 @@ class TransferServer {
         } else if (type == 'file' && peerId != null) {
           final msgId = h.header['msgId'] as String?;
           if (msgId == null) break;
-          final name = sanitizeFileName((h.header['name'] as String?) ?? 'file');
+          final name = sanitizeFileName(
+            (h.header['name'] as String?) ?? 'file',
+          );
           final size = (h.header['size'] as int?) ?? h.payloadLen;
           final ts = _ts(h.header['ts']);
+
+          final previous = chats.messageById(peerId, msgId);
+          if (previous != null) {
+            // Drain the wire body to preserve framing, but don't create a
+            // second on-disk file after an ack was lost.
+            await for (final _ in reader.payloadStream(h.payloadLen)) {}
+            _sendAck(sock, msgId, true);
+            continue;
+          }
 
           if (!cfg.autoAccept) {
             await for (final _ in reader.payloadStream(h.payloadLen)) {}
@@ -109,14 +126,16 @@ class TransferServer {
 
           final dir = cfg.effectiveDownloadDir(store);
           var target = _uniquePath(dir, name);
-          final part = File('$target.part');
+          final part = File('$target.${sock.remotePort}.part');
+          unfinished = part;
+          progressId = msgId;
           final hashSink = _HashSink();
           final hashConv = sha256.startChunkedConversion(hashSink);
           final sink = part.openWrite();
           var got = 0;
           try {
             await for (final chunk in reader.payloadStream(h.payloadLen)) {
-              sink.add(chunk);
+              await sink.addStream(Stream.value(chunk));
               hashConv.add(chunk);
               got += chunk.length;
               if (size > 0) transfers.update(msgId, got / size);
@@ -130,14 +149,19 @@ class TransferServer {
             try {
               part.deleteSync();
             } catch (_) {}
+            transfers.remove(msgId);
             break;
           }
           hashConv.close();
 
-          if (got != size) {
+          final expectedHash = h.header['sha256'] as String?;
+          if (got != size ||
+              expectedHash == null ||
+              hashSink.digest.toString() != expectedHash.toLowerCase()) {
             try {
               part.deleteSync();
             } catch (_) {}
+            transfers.remove(msgId);
             _sendAck(sock, msgId, false, 'corrupt');
             continue;
           }
@@ -152,6 +176,7 @@ class TransferServer {
               continue;
             }
           }
+          unfinished = null;
           chats.onIncoming(
             peerId,
             ChatMessage(
@@ -175,6 +200,12 @@ class TransferServer {
     } catch (_) {
       // closed / timeout — normal session end
     } finally {
+      if (progressId != null) transfers.remove(progressId);
+      try {
+        if (unfinished != null && unfinished.existsSync()) {
+          unfinished.deleteSync();
+        }
+      } catch (_) {}
       try {
         await reader.close();
       } catch (_) {}
@@ -184,12 +215,14 @@ class TransferServer {
 
   void _sendAck(Socket sock, String msgId, bool ok, [String? reason]) {
     try {
-      sock.add(FrameWriter.encode({
-        'type': 'ack',
-        'msgId': msgId,
-        'ok': ok,
-        if (reason != null) 'reason': reason,
-      }));
+      sock.add(
+        FrameWriter.encode({
+          'type': 'ack',
+          'msgId': msgId,
+          'ok': ok,
+          if (reason != null) 'reason': reason,
+        }),
+      );
     } catch (_) {}
   }
 

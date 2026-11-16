@@ -11,6 +11,7 @@ import '../state/chats_model.dart';
 import '../state/peers_model.dart';
 import '../state/transfers_model.dart';
 import 'store.dart';
+import 'protocol.dart';
 import 'transfer_client.dart';
 
 class OutboxItem {
@@ -36,26 +37,26 @@ class OutboxItem {
   });
 
   Map<String, dynamic> toJson() => {
-        'msgId': msgId,
-        'kind': kind.name,
-        'text': text,
-        'blob': blobPath,
-        'src': sourcePath,
-        'name': fileName,
-        'size': fileSize,
-        'ts': ts.toIso8601String(),
-      };
+    'msgId': msgId,
+    'kind': kind.name,
+    'text': text,
+    'blob': blobPath,
+    'src': sourcePath,
+    'name': fileName,
+    'size': fileSize,
+    'ts': ts.toIso8601String(),
+  };
 
   factory OutboxItem.fromJson(Map<String, dynamic> j) => OutboxItem(
-        msgId: j['msgId'] as String,
-        kind: j['kind'] == 'file' ? MsgKind.file : MsgKind.text,
-        text: j['text'] as String?,
-        blobPath: j['blob'] as String?,
-        sourcePath: j['src'] as String?,
-        fileName: j['name'] as String?,
-        fileSize: j['size'] as int? ?? 0,
-        ts: DateTime.tryParse(j['ts'] as String? ?? '') ?? DateTime.now(),
-      );
+    msgId: j['msgId'] as String,
+    kind: j['kind'] == 'file' ? MsgKind.file : MsgKind.text,
+    text: j['text'] as String?,
+    blobPath: j['blob'] as String?,
+    sourcePath: j['src'] as String?,
+    fileName: j['name'] as String?,
+    fileSize: j['size'] as int? ?? 0,
+    ts: DateTime.tryParse(j['ts'] as String? ?? '') ?? DateTime.now(),
+  );
 }
 
 /// Messages/files queued for offline peers. A send is always an enqueue
@@ -108,22 +109,27 @@ class Outbox extends ChangeNotifier {
   }
 
   List<ChatMessage> viewFor(String peerId) => [
-        for (final it in _queues[peerId] ?? const <OutboxItem>[])
-          ChatMessage(
-            id: it.msgId,
-            outgoing: true,
-            kind: it.kind,
-            text: it.text,
-            fileName: it.fileName,
-            fileSize: it.fileSize,
-            filePath: it.sourcePath,
-            ts: it.ts,
-            state: it.sending ? SendState.sending : SendState.pending,
-          )
-      ];
+    for (final it in _queues[peerId] ?? const <OutboxItem>[])
+      ChatMessage(
+        id: it.msgId,
+        outgoing: true,
+        kind: it.kind,
+        text: it.text,
+        fileName: it.fileName,
+        fileSize: it.fileSize,
+        filePath: it.sourcePath,
+        ts: it.ts,
+        state: it.sending ? SendState.sending : SendState.pending,
+      ),
+  ];
 
   Future<void> sendText(String peerId, String text) async {
-    final item = OutboxItem(msgId: _uuid.v4(), kind: MsgKind.text, text: text, ts: DateTime.now());
+    final item = OutboxItem(
+      msgId: _uuid.v4(),
+      kind: MsgKind.text,
+      text: text,
+      ts: DateTime.now(),
+    );
     _queues.putIfAbsent(peerId, () => []).add(item);
     await _persist(peerId);
     notifyListeners();
@@ -134,9 +140,14 @@ class Outbox extends ChangeNotifier {
     final msgId = _uuid.v4();
     final blob = File(p.join(store.outboxFilesDir.path, msgId));
     try {
-      await File(sourcePath).copy(blob.path);
+      final source = File(sourcePath);
+      if (await source.length() > FrameWriter.maxPayloadLength) {
+        throw const FileSystemException('单个文件必须小于 4 GiB');
+      }
+      await source.copy(blob.path);
     } catch (_) {
-      return; // unreadable source; UI shows nothing — acceptable for v1
+      if (await blob.exists()) await blob.delete();
+      rethrow;
     }
     final size = await blob.length();
     final item = OutboxItem(
@@ -162,7 +173,7 @@ class Outbox extends ChangeNotifier {
     final kept = <OutboxItem>[];
     for (final it in items) {
       if (ids.contains(it.msgId)) {
-        _deleteBlob(it);
+        if (!it.sending) _deleteBlob(it);
         transfers.remove(it.msgId);
       } else {
         kept.add(it);
@@ -187,12 +198,15 @@ class Outbox extends ChangeNotifier {
 
     _busy.add(peerId);
     OutboundSession? sess;
+    final batch = List<OutboxItem>.of(items);
     try {
       sess = await opener(peer);
       if (sess == null) return;
-      final batch = List<OutboxItem>.of(items);
       for (final it in batch) {
+        // A user may have removed this item while a previous send was awaiting IO.
+        if (!(_queues[peerId]?.contains(it) ?? false)) continue;
         it.sending = true;
+        notifyListeners();
         final tsMs = it.ts.millisecondsSinceEpoch;
         if (it.kind == MsgKind.text) {
           await sess.sendText(msgId: it.msgId, text: it.text ?? '', tsMs: tsMs);
@@ -205,49 +219,57 @@ class Outbox extends ChangeNotifier {
             onProgress: (f) => transfers.update(it.msgId, f),
           );
         }
-      }
-      notifyListeners();
-      final acks = await sess.collectAcks(batch.map((e) => e.msgId).toSet());
-      final remaining = <OutboxItem>[];
-      for (final it in batch) {
-        final a = acks[it.msgId];
-        if (a == null) {
-          it.sending = false;
-          remaining.add(it);
-          continue;
+        // Commit each ack before sending another file: later failures must not
+        // roll back deliveries already confirmed by the receiver.
+        final acks = await sess.collectAcks({it.msgId});
+        final ack = acks[it.msgId];
+        if (ack == null || (!ack.ok && ack.reason != 'declined')) break;
+        final live = _queues[peerId];
+        if (live != null && live.contains(it)) {
+          chats.recordAck(
+            peerId,
+            ChatMessage(
+              id: it.msgId,
+              outgoing: true,
+              kind: it.kind,
+              text: it.text,
+              fileName: it.fileName,
+              fileSize: it.fileSize,
+              filePath: it.sourcePath,
+              ts: it.ts,
+              state: ack.ok ? SendState.delivered : SendState.refused,
+            ),
+          );
+          live.remove(it);
+          if (live.isEmpty) _queues.remove(peerId);
+          await _persist(peerId);
         }
-        chats.recordAck(
-          peerId,
-          ChatMessage(
-            id: it.msgId,
-            outgoing: true,
-            kind: it.kind,
-            text: it.text,
-            fileName: it.fileName,
-            fileSize: it.fileSize,
-            filePath: it.sourcePath,
-            ts: it.ts,
-            state: a.ok ? SendState.delivered : SendState.refused,
-          ),
-        );
         _deleteBlob(it);
         transfers.remove(it.msgId);
+        notifyListeners();
       }
-      if (remaining.isEmpty) {
-        _queues.remove(peerId);
-      } else {
-        _queues[peerId] = remaining;
-      }
-      await _persist(peerId);
-      notifyListeners();
     } catch (_) {
-      for (final it in _queues[peerId] ?? const <OutboxItem>[]) {
-        it.sending = false;
-      }
-      notifyListeners();
+      // Keep unacknowledged items persisted for the next retry.
     } finally {
-      await sess?.close();
-      _busy.remove(peerId);
+      for (final it in batch) {
+        it.sending = false;
+        transfers.remove(it.msgId);
+        if (!(_queues[peerId]?.contains(it) ?? false)) _deleteBlob(it);
+      }
+      try {
+        await sess?.close();
+      } finally {
+        _busy.remove(peerId);
+        notifyListeners();
+      }
+      // Items enqueued during this batch were never part of its snapshot.
+      // Flush them immediately, but avoid a tight retry loop on failed items.
+      final live = _queues[peerId];
+      if (live != null &&
+          live.isNotEmpty &&
+          !live.any((it) => batch.contains(it))) {
+        unawaited(flushPeer(peerId));
+      }
     }
   }
 
@@ -268,7 +290,11 @@ class Outbox extends ChangeNotifier {
       return;
     }
     AppStore.writeAtomic(
-        f, jsonEncode({'items': [for (final i in items) i.toJson()]}));
+      f,
+      jsonEncode({
+        'items': [for (final i in items) i.toJson()],
+      }),
+    );
   }
 
   /// Safety net: retry online peers with pending items (e.g. transient error).

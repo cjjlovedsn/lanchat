@@ -36,7 +36,9 @@ class ChatsModel extends ChangeNotifier {
         for (final line in f.readAsLinesSync()) {
           if (line.trim().isEmpty) continue;
           try {
-            list.add(ChatMessage.fromJson(jsonDecode(line) as Map<String, dynamic>));
+            list.add(
+              ChatMessage.fromJson(jsonDecode(line) as Map<String, dynamic>),
+            );
           } catch (_) {}
         }
         _history[peerId] = list;
@@ -46,6 +48,13 @@ class ChatsModel extends ChangeNotifier {
 
   List<ChatMessage> historyFor(String peerId) =>
       List<ChatMessage>.of(_history[peerId] ?? const []);
+
+  ChatMessage? messageById(String peerId, String msgId) {
+    for (final msg in _history[peerId] ?? const <ChatMessage>[]) {
+      if (msg.id == msgId) return msg;
+    }
+    return null;
+  }
 
   /// Dedup by msgId: a resend after a lost ack must not duplicate history.
   void onIncoming(String peerId, ChatMessage msg) {
@@ -104,7 +113,9 @@ class ChatsModel extends ChangeNotifier {
 /// History + pending outbox items, ordered by ts (stable tiebreak so an
 /// acked message keeps its place relative to still-pending ones).
 List<ChatMessage> mergedChatView(
-    List<ChatMessage> history, List<ChatMessage> pending) {
+  List<ChatMessage> history,
+  List<ChatMessage> pending,
+) {
   final all = <(ChatMessage, int)>[
     for (final (i, m) in history.indexed) (m, i),
     for (final (i, m) in pending.indexed) (m, i + (1 << 30)),

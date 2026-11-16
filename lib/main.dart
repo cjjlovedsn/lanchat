@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:provider/provider.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
@@ -16,9 +17,12 @@ import 'state/chats_model.dart';
 import 'state/peers_model.dart';
 import 'state/transfers_model.dart';
 import 'ui/shell.dart';
+import 'ui/widgets/video_poster.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
+  VideoPosters.enabled = true;
   if (K.isDesktop) {
     await windowManager.ensureInitialized();
   }
@@ -55,12 +59,14 @@ Future<void> main() async {
 
   // Android: coming back from background/screen-off, re-join the multicast
   // group (membership is often dropped) and announce immediately.
-  AppLifecycleListener(onStateChange: (s) {
-    if (s == AppLifecycleState.resumed) {
-      discovery.announceNow();
-      discovery.rejoinMulticast();
-    }
-  });
+  AppLifecycleListener(
+    onStateChange: (s) {
+      if (s == AppLifecycleState.resumed) {
+        discovery.announceNow();
+        discovery.rejoinMulticast();
+      }
+    },
+  );
 
   if (K.isDesktop) {
     await windowManager.waitUntilReadyToShow(
@@ -77,23 +83,28 @@ Future<void> main() async {
     );
   }
 
-  runApp(LanChatApp(
-    store: store,
-    config: config,
-    peers: peers,
-    chats: chats,
-    transfers: transfers,
-    outbox: outbox,
-  ));
+  runApp(
+    LanChatApp(
+      store: store,
+      config: config,
+      peers: peers,
+      chats: chats,
+      transfers: transfers,
+      outbox: outbox,
+    ),
+  );
 
   if (!K.isDesktop) return;
   try {
     await trayManager.setIcon(
-        Platform.isWindows ? 'assets/tray_icon.ico' : 'assets/tray_icon.png');
-    final menu = Menu(items: [
-      MenuItem(key: 'show', label: '显示主界面'),
-      MenuItem(key: 'exit', label: '退出'),
-    ]);
+      Platform.isWindows ? 'assets/tray_icon.ico' : 'assets/tray_icon.png',
+    );
+    final menu = Menu(
+      items: [
+        MenuItem(key: 'show', label: '显示主界面'),
+        MenuItem(key: 'exit', label: '退出'),
+      ],
+    );
     await trayManager.setContextMenu(menu);
     await trayManager.setToolTip(K.appName);
   } catch (_) {}

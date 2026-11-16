@@ -20,14 +20,18 @@ class SendReport {
 /// One TCP session that can push several messages, then collect their acks.
 /// Abstract so the outbox can be unit-tested with a fake session.
 abstract class OutboundSession {
-  Future<void> sendText(
-      {required String msgId, required String text, required int tsMs});
-  Future<void> sendFile(
-      {required String msgId,
-      required String name,
-      required String path,
-      required int tsMs,
-      required void Function(double) onProgress});
+  Future<void> sendText({
+    required String msgId,
+    required String text,
+    required int tsMs,
+  });
+  Future<void> sendFile({
+    required String msgId,
+    required String name,
+    required String path,
+    required int tsMs,
+    required void Function(double) onProgress,
+  });
   Future<Map<String, SendReport>> collectAcks(Set<String> msgIds);
   Future<void> close();
 }
@@ -45,51 +49,69 @@ class TcpOutboundSession implements OutboundSession {
     if (addr == null) return null;
     Socket sock;
     try {
-      sock = await Socket.connect(addr, peer.port,
-          timeout: const Duration(seconds: 4));
+      sock = await Socket.connect(
+        addr,
+        peer.port,
+        timeout: const Duration(seconds: 4),
+      );
     } catch (_) {
       return null;
     }
     final s = TcpOutboundSession._(sock, FrameReader(sock));
-    sock.add(FrameWriter.encode({
-      'type': 'hello',
-      'id': cfg.deviceId,
-      'name': cfg.nickname,
-      'platform': cfg.platformLabel,
-      'port': cfg.tcpPort,
-    }));
+    sock.add(
+      FrameWriter.encode({
+        'type': 'hello',
+        'id': cfg.deviceId,
+        'name': cfg.nickname,
+        'platform': cfg.platformLabel,
+        'port': cfg.tcpPort,
+      }),
+    );
     return s;
   }
 
   @override
-  Future<void> sendText(
-      {required String msgId, required String text, required int tsMs}) async {
-    _sock.add(FrameWriter.encode({'type': 'text', 'msgId': msgId, 'ts': tsMs},
-        Uint8List.fromList(utf8.encode(text))));
+  Future<void> sendText({
+    required String msgId,
+    required String text,
+    required int tsMs,
+  }) async {
+    _sock.add(
+      FrameWriter.encode({
+        'type': 'text',
+        'msgId': msgId,
+        'ts': tsMs,
+      }, Uint8List.fromList(utf8.encode(text))),
+    );
     await _sock.flush();
   }
 
   @override
-  Future<void> sendFile(
-      {required String msgId,
-      required String name,
-      required String path,
-      required int tsMs,
-      required void Function(double) onProgress}) async {
+  Future<void> sendFile({
+    required String msgId,
+    required String name,
+    required String path,
+    required int tsMs,
+    required void Function(double) onProgress,
+  }) async {
     final f = File(path);
     final size = await f.length();
     final digest = await sha256.bind(f.openRead()).last;
-    _sock.add(FrameWriter.encodeHeader({
-      'type': 'file',
-      'msgId': msgId,
-      'ts': tsMs,
-      'name': p.basename(name),
-      'size': size,
-      'sha256': digest.toString(),
-    }, size));
+    _sock.add(
+      FrameWriter.encodeHeader({
+        'type': 'file',
+        'msgId': msgId,
+        'ts': tsMs,
+        'name': p.basename(name),
+        'size': size,
+        'sha256': digest.toString(),
+      }, size),
+    );
     var sent = 0;
     await for (final chunk in f.openRead()) {
-      _sock.add(chunk);
+      // addStream applies socket backpressure instead of queuing a whole
+      // large video in memory when the receiver is slow.
+      await _sock.addStream(Stream.value(chunk));
       sent += chunk.length;
       onProgress(sent / size);
     }
@@ -101,12 +123,17 @@ class TcpOutboundSession implements OutboundSession {
     final out = <String, SendReport>{};
     try {
       while (out.length < msgIds.length) {
-        final h = await _reader.readHeader(timeout: const Duration(seconds: 90));
+        final h = await _reader.readHeader(
+          timeout: const Duration(seconds: 90),
+        );
         if (h.header['type'] != 'ack') continue;
         final id = h.header['msgId'] as String?;
         if (id == null || !msgIds.contains(id) || out.containsKey(id)) continue;
-        out[id] =
-            SendReport(id, h.header['ok'] == true, reason: h.header['reason'] as String?);
+        out[id] = SendReport(
+          id,
+          h.header['ok'] == true,
+          reason: h.header['reason'] as String?,
+        );
       }
     } catch (_) {
       // closed / timeout: missing ids count as not delivered

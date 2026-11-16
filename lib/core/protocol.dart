@@ -7,10 +7,15 @@ import 'dart:typed_data';
 /// Wire format, big endian:
 ///   [u32 jsonLen][header JSON utf8][u32 payloadLen][payload bytes]
 class FrameWriter {
+  static const maxPayloadLength = 0xffffffff;
+
   /// Header + length prefix only; the payload is appended separately. Used
   /// for streamed file bodies where the size is known up front but the bytes
   /// are read in chunks.
   static Uint8List encodeHeader(Map<String, dynamic> header, int payloadLen) {
+    if (payloadLen < 0 || payloadLen > maxPayloadLength) {
+      throw const FormatException('单个文件必须小于 4 GiB');
+    }
     final json = utf8.encode(jsonEncode(header));
     final out = BytesBuilder();
     out.add(_u32(json.length));
