@@ -116,11 +116,14 @@ class PeersModel extends ChangeNotifier {
 
   List<Peer> get sorted {
     final l = peers.values.toList();
+    // Never order by lastSeen: heartbeats update it every few seconds and
+    // would reshuffle the list constantly. Name order keeps it stable.
     l.sort((a, b) {
       final oa = _online.contains(a.id);
       final ob = _online.contains(b.id);
       if (oa != ob) return oa ? -1 : 1;
-      return b.lastSeen.compareTo(a.lastSeen);
+      final byName = a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      return byName != 0 ? byName : a.id.compareTo(b.id);
     });
     return l;
   }

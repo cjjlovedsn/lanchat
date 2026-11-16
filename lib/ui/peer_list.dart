@@ -247,17 +247,21 @@ class PeerListPanel extends StatelessWidget {
           ),
           Padding(
             padding: const EdgeInsets.all(12),
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: scheme.surface,
+            child: Material(
+              color: scheme.surface,
+              shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(
+                side: BorderSide(
                   color: scheme.outlineVariant.withValues(alpha: .65),
                 ),
               ),
-              child: Row(
-                children: [
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: () => _editOwnNickname(context),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
                   CircleAvatar(
                     radius: 17,
                     backgroundColor: scheme.primaryContainer,
@@ -293,13 +297,49 @@ class PeerListPanel extends StatelessWidget {
                     ),
                   ),
                   Icon(Icons.circle, color: scheme.primary, size: 6),
-                ],
+                  ],
+                ),
               ),
             ),
+          ),
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _editOwnNickname(BuildContext context) async {
+    final cfg = context.read<Config>();
+    final ctrl = TextEditingController(text: cfg.nickname);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('修改昵称'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(
+            isDense: true,
+            hintText: '显示给局域网内其他人',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (_) => Navigator.of(ctx).pop(true),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) await cfg.update(nickname: ctrl.text);
+    // The dialog's exit animation still references the controller.
+    Future.delayed(const Duration(milliseconds: 600), ctrl.dispose);
   }
 
   Widget _tile(
