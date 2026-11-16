@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 import 'package:pub_semver/pub_semver.dart';
 
 import 'store.dart';
+import 'system_proxy.dart';
 
 const updateRepository = 'cjjlovedsn/lanchat';
 
@@ -163,10 +164,23 @@ class AppUpdates extends ChangeNotifier {
     }),
   );
 
-  HttpClient _client() => clientFactory()
-    ..connectionTimeout = const Duration(seconds: 15)
-    ..idleTimeout = const Duration(seconds: 30)
-    ..userAgent = 'LanChat/$currentVersion';
+  /// Update traffic follows the OS proxy (Dart's HttpClient would otherwise
+  /// go direct and time out where GitHub needs a local proxy). Loopback
+  /// targets stay direct so local test servers keep working.
+  Future<HttpClient> _client() async {
+    final client = clientFactory()
+      ..connectionTimeout = const Duration(seconds: 15)
+      ..idleTimeout = const Duration(seconds: 30)
+      ..userAgent = 'LanChat/$currentVersion';
+    final proxy = await systemHttpProxy();
+    if (proxy != null) {
+      client.findProxy = (uri) => _isLoopback(uri.host) ? 'DIRECT' : 'PROXY $proxy';
+    }
+    return client;
+  }
+
+  static bool _isLoopback(String host) =>
+      host == 'localhost' || host == '127.0.0.1' || host == '::1';
 
   Future<void> check({bool automatic = false}) async {
     if (busy || _disposed) return;
@@ -187,7 +201,7 @@ class AppUpdates extends ChangeNotifier {
     shouldPrompt = false;
     error = null;
     _notify();
-    final client = _client();
+    final client = await _client();
     try {
       final req = await client.getUrl(endpoint);
       req.headers.set(HttpHeaders.acceptHeader, 'application/vnd.github+json');
@@ -241,7 +255,7 @@ class AppUpdates extends ChangeNotifier {
     error = null;
     downloaded = null;
     _notify();
-    final client = _client();
+    final client = await _client();
     _downloadClient = client;
     final target = File(
       p.join(_directory.path, '${update.version}-${update.filename}'),

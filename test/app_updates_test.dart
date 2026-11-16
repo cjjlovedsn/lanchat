@@ -30,6 +30,8 @@ class _LocalClient implements HttpClient {
   @override
   set userAgent(String? value) => inner.userAgent = value;
   @override
+  set findProxy(String Function(Uri url)? value) => inner.findProxy = value;
+  @override
   void close({bool force = false}) => inner.close(force: force);
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
