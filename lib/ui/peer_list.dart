@@ -9,6 +9,8 @@ import '../state/chats_model.dart';
 import '../state/peers_model.dart';
 import '../core/config.dart';
 import 'widgets/settings_dialog.dart';
+import 'widgets/appearance_dialog.dart';
+import 'app_theme.dart';
 
 const _avatarColors = [
   Color(0xFF4A6BEB),
@@ -57,7 +59,6 @@ Future<void> _confirmRemovePeer(
 class PeerListPanel extends StatelessWidget {
   final String? selectedPeerId;
   final ValueChanged<String> onSelect;
-
   const PeerListPanel({
     super.key,
     required this.selectedPeerId,
@@ -69,116 +70,235 @@ class PeerListPanel extends StatelessWidget {
     final peers = context.watch<PeersModel>();
     final chats = context.watch<ChatsModel>();
     final cfg = context.watch<Config>();
-    final list = peers.sorted;
     final discovery = context.watch<Discovery?>();
-
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 8, 10),
-          child: Row(
-            children: [
-              Icon(
-                Icons.lan_outlined,
-                color: Theme.of(context).colorScheme.primary,
-                size: 22,
-              ),
-              const SizedBox(width: 8),
-              const Text(
-                'LanChat',
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
-              ),
-              const Spacer(),
-              if (discovery != null)
-                IconButton(
-                  icon: Icon(
-                    discovery.ready && discovery.lastError == null
-                        ? Icons.wifi
-                        : Icons.wifi_off,
-                    size: 20,
-                  ),
-                  tooltip: '网络诊断',
-                  onPressed: () => showNetworkStatus(context, discovery),
+    final scheme = Theme.of(context).colorScheme;
+    final list = peers.sorted;
+    final online = list.where((p) => peers.isOnline(p.id)).length;
+    final compactButton = IconButton.styleFrom(
+      minimumSize: const Size(32, 34),
+      maximumSize: const Size(34, 34),
+      padding: EdgeInsets.zero,
+      visualDensity: VisualDensity.compact,
+    );
+    return ColoredBox(
+      color: ChatPalette.of(context).sidebar,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 22, 12, 20),
+            child: Row(
+              children: [
+                Image.asset(
+                  'assets/brand/lanchat_badge.png',
+                  width: 36,
+                  height: 36,
+                  filterQuality: FilterQuality.high,
+                  excludeFromSemantics: true,
                 ),
-              IconButton(
-                icon: const Icon(Icons.settings_outlined, size: 20),
-                tooltip: '设置',
-                onPressed: () => showSettingsDialog(context),
-              ),
-            ],
-          ),
-        ),
-        const Divider(height: 1),
-        if (discovery != null && discovery.lastError != null)
-          Material(
-            color: Theme.of(context).colorScheme.errorContainer,
-            child: ListTile(
-              dense: true,
-              title: const Text('自动发现异常，正在重试', style: TextStyle(fontSize: 12)),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => showNetworkStatus(context, discovery),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'LanChat',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -.5,
+                        ),
+                      ),
+                      SizedBox(height: 1),
+                      Text(
+                        '连接身边的设备',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w400,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  style: compactButton,
+                  tooltip: '外观与主题',
+                  icon: const Icon(Icons.palette_outlined, size: 18),
+                  onPressed: () => showAppearanceDialog(context),
+                ),
+                if (discovery != null)
+                  IconButton(
+                    style: compactButton,
+                    tooltip: '网络诊断',
+                    icon: Icon(
+                      discovery.ready && discovery.lastError == null
+                          ? Icons.wifi_rounded
+                          : Icons.wifi_off_rounded,
+                      size: 18,
+                    ),
+                    onPressed: () => showNetworkStatus(context, discovery),
+                  ),
+                IconButton(
+                  style: compactButton,
+                  tooltip: '设置',
+                  icon: const Icon(Icons.tune_rounded, size: 18),
+                  onPressed: () => showSettingsDialog(context),
+                ),
+              ],
             ),
           ),
-        Expanded(
-          child: list.isEmpty
-              ? const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Text(
-                      '暂未发现局域网设备\n\n确认对方设备也运行着 LanChat',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: Colors.grey,
-                        fontSize: 13,
-                        height: 1.6,
-                      ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 18, 12),
+            child: Row(
+              children: [
+                Text(
+                  '我的设备',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: scheme.primary.withValues(alpha: .08),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '$online 在线',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: scheme.primary,
                     ),
                   ),
-                )
-              : ListView.builder(
-                  itemCount: list.length,
-                  itemBuilder: (context, i) =>
-                      _tile(context, peers, chats, list[i]),
                 ),
-        ),
-        const Divider(height: 1),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: 14,
-                backgroundColor: _colorFor(cfg.deviceId),
-                child: Text(
-                  cfg.nickname.isEmpty ? '?' : cfg.nickname.characters.first,
-                  style: const TextStyle(color: Colors.white, fontSize: 13),
+              ],
+            ),
+          ),
+          if (discovery != null && discovery.lastError != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: Material(
+                color: scheme.errorContainer,
+                borderRadius: BorderRadius.circular(12),
+                child: ListTile(
+                  dense: true,
+                  title: Text(
+                    '自动发现异常，正在重试',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: scheme.onErrorContainer,
+                    ),
+                  ),
+                  trailing: Icon(
+                    Icons.chevron_right,
+                    color: scheme.onErrorContainer,
+                  ),
+                  onTap: () => showNetworkStatus(context, discovery),
                 ),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      cfg.nickname,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
+            ),
+          Expanded(
+            child: list.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.radar_rounded,
+                            size: 38,
+                            color: scheme.primary.withValues(alpha: .5),
+                          ),
+                          const SizedBox(height: 14),
+                          const Text(
+                            '正在寻找附近设备',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            '在同一局域网内打开 LanChat\n设备会自动出现在这里',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 11,
+                              height: 1.7,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    const Text(
-                      '本机',
-                      style: TextStyle(fontSize: 11, color: Colors.grey),
-                    ),
-                  ],
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    itemCount: list.length,
+                    itemBuilder: (context, i) =>
+                        _tile(context, peers, chats, list[i]),
+                  ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: scheme.surface,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: scheme.outlineVariant.withValues(alpha: .65),
                 ),
               ),
-            ],
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 17,
+                    backgroundColor: scheme.primaryContainer,
+                    child: Icon(
+                      Icons.computer_rounded,
+                      size: 18,
+                      color: scheme.onPrimaryContainer,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          cfg.nickname,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          '本机 · ${_platformName(cfg.platformLabel)}',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.circle, color: scheme.primary, size: 6),
+                ],
+              ),
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -186,94 +306,141 @@ class PeerListPanel extends StatelessWidget {
     BuildContext context,
     PeersModel peers,
     ChatsModel chats,
-    Peer p,
+    Peer peer,
   ) {
-    final online = peers.isOnline(p.id);
-    final unread = chats.unread[p.id] ?? 0;
-    return GestureDetector(
-      onSecondaryTapUp: (d) => _confirmRemovePeer(context, peers, p),
-      child: ListTile(
-        onLongPress: () => _confirmRemovePeer(context, peers, p),
-        dense: true,
-        selected: p.id == selectedPeerId,
-        leading: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            CircleAvatar(
-              radius: 17,
-              backgroundColor: _colorFor(p.id),
-              child: Text(
-                p.name.isEmpty ? '?' : p.name.characters.first,
-                style: const TextStyle(color: Colors.white, fontSize: 16),
-              ),
-            ),
-            Positioned(
-              right: -1,
-              bottom: -1,
-              child: Container(
-                width: 11,
-                height: 11,
-                decoration: BoxDecoration(
-                  color: online
-                      ? const Color(0xFF44BD5C)
-                      : Colors.grey.shade400,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 2),
-                ),
-              ),
-            ),
-          ],
-        ),
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Flexible(
-              child: Text(
-                p.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-            const SizedBox(width: 5),
-            Icon(
-              p.platform == 'android'
-                  ? Icons.phone_android
-                  : p.platform == 'macos'
-                  ? Icons.laptop_mac
-                  : Icons.desktop_windows,
-              size: 13,
-              color: Colors.grey.shade500,
-            ),
-          ],
-        ),
-        subtitle: Text(
-          online ? '在线' : '离线 · ${formatLastSeen(p.lastSeen)}',
-          style: TextStyle(
-            fontSize: 11.5,
-            color: online ? const Color(0xFF44BD5C) : Colors.grey,
+    final scheme = Theme.of(context).colorScheme;
+    final selected = peer.id == selectedPeerId;
+    final online = peers.isOnline(peer.id);
+    final unread = chats.unread[peer.id] ?? 0;
+    final status = online
+        ? const Color(0xFF28AD83)
+        : scheme.onSurfaceVariant.withValues(alpha: .45);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Material(
+        color: selected
+            ? scheme.primary.withValues(alpha: .09)
+            : Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(13),
+          side: BorderSide(
+            color: selected
+                ? scheme.primary.withValues(alpha: .18)
+                : Colors.transparent,
           ),
         ),
-        trailing: unread > 0
-            ? Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE05252),
-                  borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(13),
+          onTap: () => onSelect(peer.id),
+          onLongPress: () => _confirmRemovePeer(context, peers, peer),
+          onSecondaryTapUp: (_) => _confirmRemovePeer(context, peers, peer),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+            child: Row(
+              children: [
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: _colorFor(peer.id).withValues(alpha: .12),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Center(
+                        child: Icon(
+                          _platformIcon(peer.platform),
+                          color: _colorFor(peer.id),
+                          size: 22,
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      right: -2,
+                      bottom: -2,
+                      child: Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          color: status,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: ChatPalette.of(context).sidebar,
+                            width: 2,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                constraints: const BoxConstraints(minWidth: 18),
-                child: Text(
-                  unread > 99 ? '99+' : '$unread',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white, fontSize: 11),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        peer.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: selected
+                              ? FontWeight.w700
+                              : FontWeight.w600,
+                          color: selected ? scheme.primary : scheme.onSurface,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        online
+                            ? '${_platformName(peer.platform)} · 在线'
+                            : '离线 · ${formatLastSeen(peer.lastSeen)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              )
-            : null,
-        onTap: () => onSelect(p.id),
+                if (unread > 0)
+                  Container(
+                    margin: const EdgeInsets.only(left: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: scheme.primary,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      unread > 99 ? '99+' : '$unread',
+                      style: TextStyle(fontSize: 10, color: scheme.onPrimary),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
 }
+
+String _platformName(String platform) => switch (platform) {
+  'android' => 'Android',
+  'macos' => 'macOS',
+  'windows' => 'Windows',
+  _ => '设备',
+};
+
+IconData _platformIcon(String platform) => switch (platform) {
+  'android' => Icons.phone_android_rounded,
+  'macos' => Icons.laptop_mac_rounded,
+  'windows' => Icons.desktop_windows_rounded,
+  _ => Icons.devices_rounded,
+};

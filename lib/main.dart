@@ -7,6 +7,7 @@ import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'core/config.dart';
+import 'core/startup.dart';
 import 'core/constants.dart';
 import 'core/discovery.dart';
 import 'core/outbox.dart';
@@ -17,6 +18,7 @@ import 'state/chats_model.dart';
 import 'state/peers_model.dart';
 import 'state/transfers_model.dart';
 import 'ui/shell.dart';
+import 'ui/app_theme.dart';
 import 'ui/widgets/video_poster.dart';
 
 Future<void> main() async {
@@ -27,6 +29,8 @@ Future<void> main() async {
     await windowManager.ensureInitialized();
   }
 
+  final startup = StartupService();
+  await startup.initialize();
   final store = await AppStore.create();
   final config = await Config.load(store.configFile);
   final peers = PeersModel(store);
@@ -94,6 +98,20 @@ Future<void> main() async {
     );
   }
 
+  if (K.isDesktop) {
+    try {
+      await trayManager.setIcon(
+        Platform.isWindows
+            ? 'assets/tray_icon.ico'
+            : Platform.isMacOS
+            ? 'assets/tray_icon_template.png'
+            : 'assets/tray_icon.png',
+        isTemplate: Platform.isMacOS,
+      );
+      await trayManager.setToolTip(K.appName);
+    } catch (_) {}
+  }
+
   runApp(
     LanChatApp(
       store: store,
@@ -103,23 +121,9 @@ Future<void> main() async {
       transfers: transfers,
       outbox: outbox,
       discovery: discovery,
+      startup: startup,
     ),
   );
-
-  if (!K.isDesktop) return;
-  try {
-    await trayManager.setIcon(
-      Platform.isWindows ? 'assets/tray_icon.ico' : 'assets/tray_icon.png',
-    );
-    final menu = Menu(
-      items: [
-        MenuItem(key: 'show', label: '显示主界面'),
-        MenuItem(key: 'exit', label: '退出'),
-      ],
-    );
-    await trayManager.setContextMenu(menu);
-    await trayManager.setToolTip(K.appName);
-  } catch (_) {}
 }
 
 class LanChatApp extends StatelessWidget {
@@ -130,6 +134,7 @@ class LanChatApp extends StatelessWidget {
   final TransfersModel transfers;
   final Outbox outbox;
   final Discovery discovery;
+  final StartupService startup;
 
   const LanChatApp({
     super.key,
@@ -140,6 +145,7 @@ class LanChatApp extends StatelessWidget {
     required this.transfers,
     required this.outbox,
     required this.discovery,
+    required this.startup,
   });
 
   @override
@@ -147,6 +153,7 @@ class LanChatApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         Provider<AppStore>.value(value: store),
+        ChangeNotifierProvider<StartupService>.value(value: startup),
         ChangeNotifierProvider<Discovery>.value(value: discovery),
         ChangeNotifierProvider<Config>.value(value: config),
         ChangeNotifierProvider<PeersModel>.value(value: peers),
@@ -154,14 +161,15 @@ class LanChatApp extends StatelessWidget {
         ChangeNotifierProvider<TransfersModel>.value(value: transfers),
         ChangeNotifierProvider<Outbox>.value(value: outbox),
       ],
-      child: MaterialApp(
-        title: K.appName,
-        debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          useMaterial3: true,
-          colorSchemeSeed: const Color(0xFF4A6BEB),
+      child: Consumer<Config>(
+        builder: (context, settings, _) => MaterialApp(
+          title: K.appName,
+          debugShowCheckedModeBanner: false,
+          theme: buildAppTheme(settings.accent, Brightness.light),
+          darkTheme: buildAppTheme(settings.accent, Brightness.dark),
+          themeMode: settings.appearance.mode,
+          home: const ShellPage(),
         ),
-        home: const ShellPage(),
       ),
     );
   }

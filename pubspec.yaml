@@ -43,6 +43,7 @@ dependencies:
   uuid: ^4.6.0
   crypto: ^3.0.8
   path: ^1.9.1
+  pasteboard: ^0.5.0
   open_filex: ^4.0.0
   url_launcher: ^6.3.2
   media_kit: ^1.2.6
@@ -73,6 +74,7 @@ flutter:
 
   assets:
     - assets/
+    - assets/brand/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

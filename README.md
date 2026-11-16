@@ -75,6 +75,32 @@ macOS 首次运行注意：
 3. 未签名 app 可能被 Gatekeeper 拦截：右键 → 打开，或
    `xattr -cr /path/to/lanchat.app`。建议用自己的 Apple ID 在 Xcode 里免费签名后分发
 
+## 在 Windows 本地打测试包
+
+使用与仓库 CI 一致的 Flutter **3.35.6**。Windows 版需要 Visual Studio 2022 的「使用 C++ 的桌面开发」工作负载；Android 版另外需要 JDK 17、Android SDK/NDK，并完成 SDK 许可确认。仅用真机测试时无需安装模拟器。
+
+在 PowerShell 中进入仓库，执行：
+
+```powershell
+git pull --ff-only
+flutter doctor -v
+flutter pub get
+flutter analyze
+flutter test
+flutter build windows --release
+flutter build apk --release
+```
+
+- Windows 便携版：`build/windows/x64/runner/Release/`，需要保留整个目录，不能只拷贝 exe。
+- Android APK：`build/app/outputs/flutter-apk/app-release.apk`。
+- Windows 安装版：安装 Inno Setup 6 后，在仓库根目录运行以下命令，产物为 `dist/lanchat-setup.exe`：
+
+```powershell
+& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer/lanchat.iss
+```
+
+这些命令只在本机生成测试包，不修改版本号、不创建 tag、不发布 Release。不要为本地测试触发发布工作流。
+
 ## 发布（GitHub Actions 自动构建）
 
 推 tag 即自动构建三端产物并发布 GitHub Release（无需任何 token）：
@@ -98,7 +124,7 @@ git push origin v1.0.0
 
 ## 聊天与媒体
 
-- 输入框支持多行，回车换行，桌面使用 Ctrl+Enter / Cmd+Enter 发送。
+- 输入框支持多行：Enter 发送，Shift+Enter / Ctrl+Enter 换行；手机也可点击工具栏换行按钮。
 - 点击输入框旁的代码按钮切换代码消息，保留缩进和空行；代码气泡支持横向滚动和一键复制原文。
 - 普通文字中的 HTTP/HTTPS 和 www 链接可点击，在外部浏览器打开。
 - 视频气泡点击后进入应用内播放器，支持进度控制和全屏；无法播放时可切换到系统播放器。不会自动播放聊天列表中的视频。
@@ -111,3 +137,19 @@ git push origin v1.0.0
 点击设备列表顶部的网络图标查看「网络诊断」，可以复制本机地址、发现监听状态、发送连接数及收到的广播数。
 
 发现服务会定期重试失败的套接字，并在网络切换或应用回到前台后重新建立连接。多播和子网广播分别使用独立的发送连接，发送失败不会关闭接收监听。Windows 安装更新后请从托盘退出旧实例再启动新版。
+
+## 外观设置
+
+设备列表顶部的调色盘或「设置 → 外观与主题」可切换晴空蓝、松石绿、暮光紫、暖砂橙四种配色，以及浅色、深色、跟随系统模式。修改即时生效并保存在本机。
+
+## 应用图标
+
+Logo 使用相扣的聊天气泡，表达局域网设备连接与对话。可编辑母版为 `assets/brand/lanchat.svg`；各平台图标均已包含在仓库中，正常构建不需要重新生成。
+
+修改母版后，安装 Python 3 和 Pillow，运行 `python3 tool/generate_brand_assets.py`，会更新 macOS、Windows、Android、托盘及应用内图标。Android 包含自适应图标；macOS 托盘使用随系统明暗变化的单色模板。
+
+## 开机启动与聊天操作
+
+- 桌面端在「设置」和托盘／状态栏右键菜单中提供「开机启动」开关，macOS 应用菜单也有相同入口。默认关闭；开启后，在当前用户登录电脑时启动。macOS 使用当前用户 LaunchAgent，Windows 使用当前用户 Run 项，无需管理员权限。移动应用位置后应重新开启以更新路径。
+- 聊天记录区域的空白处右键可选「清空聊天」，确认后仅清除当前会话的本机记录及待发送队列，保留已接收文件；正在发送的内容可能已经送达。
+- 输入框支持粘贴文件及图片：Mac 用 Cmd+V，Windows 用 Ctrl+V，也可在输入框右键选「粘贴」。附件直接发送，已有文字草稿会保留；纯文字按原样插入输入框。暂不支持粘贴文件夹。Android 支持系统剪贴板 URI 及输入法图片插入，具体能力取决于来源应用和输入法。

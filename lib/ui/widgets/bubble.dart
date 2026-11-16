@@ -10,46 +10,79 @@ import 'image_viewer.dart';
 import 'message_text.dart';
 import 'video_viewer.dart';
 import 'video_poster.dart';
+import '../app_theme.dart';
 
 class MessageBubble extends StatelessWidget {
   final ChatMessage msg;
-  const MessageBubble({super.key, required this.msg});
+  final GestureTapUpCallback? onSecondaryTapUp;
+  final GestureLongPressStartCallback? onLongPressStart;
+  const MessageBubble({
+    super.key,
+    required this.msg,
+    this.onSecondaryTapUp,
+    this.onLongPressStart,
+  });
 
   @override
   Widget build(BuildContext context) {
     final out = msg.outgoing;
     final scheme = Theme.of(context).colorScheme;
-    final metaColor = out ? Colors.white.withValues(alpha: 0.75) : Colors.grey;
+    final palette = ChatPalette.of(context);
+    final metaColor = out
+        ? palette.onOutgoing.withValues(alpha: .88)
+        : scheme.onSurfaceVariant;
 
     return Align(
       alignment: out ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-        constraints: const BoxConstraints(maxWidth: 480),
-        decoration: BoxDecoration(
-          color: out ? scheme.primary : scheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(10),
-            topRight: const Radius.circular(10),
-            bottomLeft: Radius.circular(out ? 10 : 3),
-            bottomRight: Radius.circular(out ? 3 : 10),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onSecondaryTapUp: onSecondaryTapUp,
+        onLongPressStart: onLongPressStart,
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.sizeOf(context).width < 640
+                ? MediaQuery.sizeOf(context).width * .8
+                : 480,
           ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (msg.kind == MsgKind.text)
-              MessageText(
-                text: msg.text ?? '',
-                color: out ? Colors.white : scheme.onSurface,
-              )
-            else
-              FileCard(msg: msg),
-            const SizedBox(height: 5),
-            _meta(context, metaColor),
-          ],
+          decoration: BoxDecoration(
+            color: out ? palette.outgoing : palette.incoming,
+            border: out
+                ? null
+                : Border.all(
+                    color: scheme.outlineVariant.withValues(alpha: .55),
+                  ),
+            boxShadow: [
+              if (!out)
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: .025),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+            ],
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(16),
+              topRight: const Radius.circular(16),
+              bottomLeft: Radius.circular(out ? 16 : 5),
+              bottomRight: Radius.circular(out ? 5 : 16),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (msg.kind == MsgKind.text)
+                MessageText(
+                  text: msg.text ?? '',
+                  color: out ? palette.onOutgoing : scheme.onSurface,
+                )
+              else
+                FileCard(msg: msg),
+              const SizedBox(height: 5),
+              _meta(context, metaColor),
+            ],
+          ),
         ),
       ),
     );
@@ -188,10 +221,13 @@ class FileCard extends StatelessWidget {
     final ext = _extOf(msg.fileName);
     final isImage = _imageExt.contains(ext);
     final isVideo = _videoExt.contains(ext);
+    final palette = ChatPalette.of(context);
     final dark = msg.outgoing
-        ? Colors.white
+        ? palette.onOutgoing
         : Theme.of(context).colorScheme.onSurface;
-    final sub = msg.outgoing ? Colors.white70 : Colors.grey;
+    final sub = msg.outgoing
+        ? palette.onOutgoing.withValues(alpha: .88)
+        : Theme.of(context).colorScheme.onSurfaceVariant;
 
     String hint;
     if (!hasLocal) {
@@ -244,7 +280,9 @@ class FileCard extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: fileGone ? Colors.grey : dark,
+                  color: fileGone
+                      ? Theme.of(context).colorScheme.onSurfaceVariant
+                      : dark,
                 ),
               ),
               const SizedBox(height: 2),
@@ -260,14 +298,14 @@ class FileCard extends StatelessWidget {
                     Icon(
                       Icons.delete_outline,
                       size: 12,
-                      color: Colors.orange.shade700,
+                      color: Theme.of(context).colorScheme.error,
                     ),
                     const SizedBox(width: 3),
                     Text(
                       '文件已被清理或移动',
                       style: TextStyle(
                         fontSize: 11,
-                        color: Colors.orange.shade700,
+                        color: Theme.of(context).colorScheme.error,
                       ),
                     ),
                   ],

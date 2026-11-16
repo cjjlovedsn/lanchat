@@ -7,6 +7,10 @@ import 'package:uuid/uuid.dart';
 import 'constants.dart';
 import 'store.dart';
 
+enum AppAppearance { system, light, dark }
+
+enum AppAccent { ocean, forest, violet, amber }
+
 /// This device identity + user preferences.
 class Config extends ChangeNotifier {
   final File file;
@@ -14,9 +18,20 @@ class Config extends ChangeNotifier {
   String nickname;
   String? downloadDir; // null → store.defaultDownloadsDir
   bool autoAccept;
+  AppAppearance appearance;
+  AppAccent accent;
   int tcpPort; // actual bound port (bumped if taken, e.g. 2nd local instance)
 
-  Config._(this.file, this.deviceId, this.nickname, this.downloadDir, this.autoAccept, this.tcpPort);
+  Config._(
+    this.file,
+    this.deviceId,
+    this.nickname,
+    this.downloadDir,
+    this.autoAccept,
+    this.tcpPort, {
+    this.appearance = AppAppearance.system,
+    this.accent = AppAccent.ocean,
+  });
 
   static Future<Config> load(File file) async {
     Map<String, dynamic>? j;
@@ -34,17 +49,30 @@ class Config extends ChangeNotifier {
       j?['downloadDir'] as String?,
       j?['autoAccept'] as bool? ?? true,
       (j?['tcpPort'] as int?) ?? K.tcpPort,
+      appearance: AppAppearance.values.firstWhere(
+        (v) => v.name == j?['appearance'],
+        orElse: () => AppAppearance.system,
+      ),
+      accent: AppAccent.values.firstWhere(
+        (v) => v.name == j?['accent'],
+        orElse: () => AppAccent.ocean,
+      ),
     );
     await cfg.save();
     return cfg;
   }
 
-  String get platformLabel =>
-      Platform.isWindows ? 'windows' : Platform.isMacOS ? 'macos' : 'android';
+  String get platformLabel => Platform.isWindows
+      ? 'windows'
+      : Platform.isMacOS
+      ? 'macos'
+      : 'android';
 
   Directory effectiveDownloadDir(AppStore store) {
     final d = downloadDir;
-    if (d != null && d.isNotEmpty && Directory(d).existsSync()) return Directory(d);
+    if (d != null && d.isNotEmpty && Directory(d).existsSync()) {
+      return Directory(d);
+    }
     return store.defaultDownloadsDir;
   }
 
@@ -57,14 +85,27 @@ class Config extends ChangeNotifier {
         'downloadDir': downloadDir,
         'autoAccept': autoAccept,
         'tcpPort': tcpPort,
+        'appearance': appearance.name,
+        'accent': accent.name,
       }),
     );
   }
 
-  Future<void> update({String? nickname, String? downloadDir, bool? autoAccept, bool downloadDirSet = false}) async {
-    if (nickname != null && nickname.trim().isNotEmpty) this.nickname = nickname.trim();
+  Future<void> update({
+    String? nickname,
+    String? downloadDir,
+    bool? autoAccept,
+    bool downloadDirSet = false,
+    AppAppearance? appearance,
+    AppAccent? accent,
+  }) async {
+    if (nickname != null && nickname.trim().isNotEmpty) {
+      this.nickname = nickname.trim();
+    }
     if (downloadDirSet) this.downloadDir = downloadDir;
     if (autoAccept != null) this.autoAccept = autoAccept;
+    if (appearance != null) this.appearance = appearance;
+    if (accent != null) this.accent = accent;
     await save();
     notifyListeners();
   }

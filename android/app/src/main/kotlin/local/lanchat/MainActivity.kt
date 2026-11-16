@@ -7,6 +7,9 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
+import android.provider.OpenableColumns
+import java.io.File
+import java.util.UUID
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -48,6 +51,31 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "lanchat/clipboard")
+            .setMethodCallHandler { call, result ->
+                if (call.method != "import") { result.notImplemented(); return@setMethodCallHandler }
+                val paths = call.arguments as? List<*>
+                if (paths == null) { result.error("invalid", "Missing clipboard files", null); return@setMethodCallHandler }
+                Thread {
+                    try {
+                        val copied = paths.map { value ->
+                            val uri = Uri.parse(value as String)
+                            var name = "粘贴的文件"
+                            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                                if (cursor.moveToFirst()) name = cursor.getString(0) ?: name
+                            }
+                            val directory = File(cacheDir, "clipboard-" + UUID.randomUUID()).apply { mkdirs() }
+                            val file = File(directory, File(name).name)
+                            val input = contentResolver.openInputStream(uri) ?: throw java.io.IOException("Cannot read clipboard")
+                            input.use { source -> file.outputStream().use { target -> source.copyTo(target) } }
+                            file.absolutePath
+                        }
+                        runOnUiThread { result.success(copied) }
+                    } catch (e: Exception) {
+                        runOnUiThread { result.error("clipboard", "Cannot read clipboard files", null) }
+                    }
+                }.start()
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "lanchat/storage")
             .setMethodCallHandler { call, result ->
                 when (call.method) {

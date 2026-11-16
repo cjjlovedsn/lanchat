@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -52,7 +54,13 @@ class _MessageTextState extends State<MessageText> {
         scrollDirection: Axis.horizontal,
         child: SelectableText(
           code,
-          style: style.copyWith(fontFamily: 'monospace'),
+          style: style.copyWith(
+            fontFamily: Platform.isMacOS
+                ? 'Menlo'
+                : Platform.isWindows
+                ? 'Consolas'
+                : 'monospace',
+          ),
         ),
       );
     } else {
@@ -77,7 +85,10 @@ class _MessageTextState extends State<MessageText> {
         offset = link.end;
       }
       spans.add(TextSpan(text: content.substring(offset)));
-      body = SelectableText.rich(TextSpan(style: style, children: spans));
+      body = SelectableText.rich(
+        TextSpan(style: style, children: spans),
+        textWidthBasis: TextWidthBasis.longestLine,
+      );
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -88,24 +99,34 @@ class _MessageTextState extends State<MessageText> {
             padding: const EdgeInsets.only(bottom: 6),
             child: Text('代码', style: style.copyWith(fontSize: 11)),
           ),
-        body,
-        Align(
-          alignment: Alignment.centerRight,
-          child: IconButton(
-            visualDensity: VisualDensity.compact,
-            tooltip: code != null ? '复制代码' : '复制全文',
-            icon: Icon(Icons.copy_outlined, size: 16, color: widget.color),
-            onPressed: () async {
-              await Clipboard.setData(ClipboardData(text: content));
-              if (!context.mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('已复制'),
-                  duration: Duration(seconds: 1),
+        Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Padding(padding: const EdgeInsets.only(right: 24), child: body),
+            Positioned(
+              right: -9,
+              top: -8,
+              child: IconButton(
+                visualDensity: VisualDensity.compact,
+                tooltip: code != null ? '复制代码' : '复制全文',
+                icon: Icon(
+                  Icons.copy_rounded,
+                  size: 13,
+                  color: widget.color.withValues(alpha: .8),
                 ),
-              );
-            },
-          ),
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: content));
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('已复制'),
+                      duration: Duration(seconds: 1),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
         ),
       ],
     );

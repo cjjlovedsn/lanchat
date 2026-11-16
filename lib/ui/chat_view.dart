@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
 
 import '../core/config.dart';
+import '../core/clipboard_attachments.dart';
 import '../core/message_text.dart';
 import '../core/outbox.dart';
 import '../core/storage_perm.dart';
@@ -17,6 +18,7 @@ import '../models/message.dart';
 import '../state/chats_model.dart';
 import '../state/peers_model.dart';
 import 'widgets/bubble.dart';
+import 'app_theme.dart';
 
 class ChatView extends StatefulWidget {
   final String peerId;
@@ -33,6 +35,8 @@ class _ChatViewState extends State<ChatView> {
   bool _dragging = false;
   bool _codeMode = false;
   bool _savingText = false;
+  bool _pasting = false;
+  bool _composerFocused = false;
   int _lastCount = 0;
   final Set<String> _selected = {};
   bool _selecting = false;
@@ -51,9 +55,60 @@ class _ChatViewState extends State<ChatView> {
 
   Future<void> _deleteMessages(Set<String> ids) async {
     if (ids.isEmpty) return;
-    context.read<ChatsModel>().deleteFor(widget.peerId, ids);
-    await context.read<Outbox>().remove(widget.peerId, ids);
-    _exitSelecting();
+    final peerId = widget.peerId;
+    final chats = context.read<ChatsModel>();
+    final outbox = context.read<Outbox>();
+    try {
+      chats.deleteFor(peerId, ids);
+      await outbox.remove(peerId, ids);
+      if (mounted && widget.peerId == peerId) _exitSelecting();
+    } catch (_) {
+      if (mounted) _showError('删除失败，请检查存储空间和文件权限');
+    }
+  }
+
+  Future<void> _showBackgroundMenu(Offset globalPos) async {
+    final peerId = widget.peerId;
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final local = overlay.globalToLocal(globalPos);
+    final action = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromSize(
+        Rect.fromLTWH(local.dx, local.dy, 0, 0),
+        overlay.size,
+      ),
+      items: const [PopupMenuItem(value: 'clear', child: Text('清空聊天'))],
+    );
+    if (action != 'clear' || !mounted || widget.peerId != peerId) return;
+    final ids = {
+      ...context.read<ChatsModel>().historyFor(peerId).map((m) => m.id),
+      ...context.read<Outbox>().viewFor(peerId).map((m) => m.id),
+    };
+    if (ids.isEmpty) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        constraints: const BoxConstraints(maxWidth: 440),
+        title: const Text('清空当前聊天？'),
+        content: const Text(
+          '将清空本机当前会话的聊天记录，并移除待发送消息。已接收的文件会保留，对方的记录不受影响。正在传输的内容可能已送达。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('清空'),
+          ),
+        ],
+      ),
+    );
+    // Do not clear another conversation if navigation happened during the dialog.
+    if (ok == true && mounted && widget.peerId == peerId) {
+      await _deleteMessages(ids);
+    }
   }
 
   Future<void> _confirmDeleteSelected() async {
@@ -219,7 +274,11 @@ class _ChatViewState extends State<ChatView> {
   }
 
   void _send() {
-    if (_savingText) return;
+    if (_savingText ||
+        (_input.value.composing.isValid &&
+            !_input.value.composing.isCollapsed)) {
+      return;
+    }
     final text = _input.text;
     if (text.trim().isEmpty) return;
     _sendText(text);
@@ -294,29 +353,34 @@ class _ChatViewState extends State<ChatView> {
       _lastCount = msgs.length;
     }
 
-    Widget listArea = Stack(
-      children: [
-        ListView.builder(
-          controller: _scroll,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          itemCount: msgs.length,
-          itemBuilder: (context, i) => _buildRow(msgs[i]),
-        ),
-        if (_dragging)
-          Positioned.fill(
-            child: Container(
-              color: Theme.of(
-                context,
-              ).colorScheme.primary.withValues(alpha: 0.08),
-              child: const Center(
-                child: Text(
-                  '松开即发送',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+    Widget listArea = GestureDetector(
+      key: const ValueKey('chat-background'),
+      behavior: HitTestBehavior.opaque,
+      onSecondaryTapUp: (d) => _showBackgroundMenu(d.globalPosition),
+      child: Stack(
+        children: [
+          ListView.builder(
+            controller: _scroll,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            itemCount: msgs.length,
+            itemBuilder: (context, i) => _buildRow(msgs[i]),
+          ),
+          if (_dragging)
+            Positioned.fill(
+              child: Container(
+                color: Theme.of(
+                  context,
+                ).colorScheme.primary.withValues(alpha: 0.08),
+                child: const Center(
+                  child: Text(
+                    '松开即发送',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
                 ),
               ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
     if (!Platform.isAndroid) {
       listArea = DropTarget(
@@ -342,10 +406,9 @@ class _ChatViewState extends State<ChatView> {
       },
       child: Column(
         children: [
-          _header(context, peer.name, peer.id, online),
+          _header(context, peer.name, peer.platform, online),
           const Divider(height: 1),
           Expanded(child: listArea),
-          const Divider(height: 1),
           _inputBar(context),
         ],
       ),
@@ -380,17 +443,17 @@ class _ChatViewState extends State<ChatView> {
         ),
       );
     }
-    return GestureDetector(
+    return MessageBubble(
+      msg: msg,
       onLongPressStart: (d) => _showMsgMenu(msg, d.globalPosition),
       onSecondaryTapUp: (d) => _showMsgMenu(msg, d.globalPosition),
-      child: bubble,
     );
   }
 
   Widget _header(
     BuildContext context,
     String name,
-    String peerId,
+    String platform,
     bool online,
   ) {
     if (_selecting) {
@@ -425,43 +488,78 @@ class _ChatViewState extends State<ChatView> {
         ),
       );
     }
+    final scheme = Theme.of(context).colorScheme;
+    final status = online ? const Color(0xFF28AD83) : scheme.onSurfaceVariant;
+    final label = switch (platform) {
+      'windows' => 'Windows',
+      'macos' => 'macOS',
+      'android' => 'Android',
+      _ => '设备',
+    };
     return Container(
-      height: 58,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      height: 78,
+      color: scheme.surface,
+      padding: const EdgeInsets.symmetric(horizontal: 18),
       child: Row(
         children: [
           if (widget.onBack != null) ...[
             IconButton(
-              icon: const Icon(Icons.arrow_back, size: 22),
+              icon: const Icon(Icons.arrow_back_rounded, size: 21),
               tooltip: '返回',
               onPressed: widget.onBack,
             ),
             const SizedBox(width: 4),
           ],
-          Flexible(
-            child: Text(
-              name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-            ),
-          ),
-          const SizedBox(width: 10),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
-              color: online ? const Color(0x1A44BD5C) : Colors.grey.shade200,
-              borderRadius: BorderRadius.circular(4),
+              color: scheme.primary.withValues(alpha: .09),
+              borderRadius: BorderRadius.circular(12),
             ),
-            child: Text(
-              online ? '在线' : '离线，待上线送达',
-              style: TextStyle(
-                fontSize: 11,
-                color: online ? const Color(0xFF2F9E44) : Colors.grey,
-              ),
+            child: Icon(
+              switch (platform) {
+                'android' => Icons.phone_android_rounded,
+                'macos' => Icons.laptop_mac_rounded,
+                _ => Icons.desktop_windows_rounded,
+              },
+              size: 22,
+              color: scheme.primary,
             ),
           ),
-          const Spacer(),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Row(
+                  children: [
+                    Icon(Icons.circle, size: 6, color: status),
+                    const SizedBox(width: 5),
+                    Flexible(
+                      child: Text(
+                        online ? '$label · 在线' : '离线 · 上线后自动送达',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 10.5, color: status),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
           if (!Platform.isAndroid)
             IconButton(
               icon: const Icon(Icons.folder_open_outlined, size: 20),
@@ -478,65 +576,279 @@ class _ChatViewState extends State<ChatView> {
     );
   }
 
+  Future<void> _paste() async {
+    if (_pasting) return;
+    _pasting = true;
+    final peerId = widget.peerId;
+    final store = context.read<AppStore>();
+    final outbox = context.read<Outbox>();
+    try {
+      List<String> paths;
+      try {
+        paths = await ClipboardAttachments.read(store);
+      } on MissingPluginException {
+        paths = [];
+      }
+      if (!mounted || widget.peerId != peerId) return;
+      if (paths.isNotEmpty) {
+        for (final path in paths) {
+          await _queueFile(outbox, peerId, path);
+        }
+      } else {
+        final data = await Clipboard.getData(Clipboard.kTextPlain);
+        if (!mounted || widget.peerId != peerId || data?.text == null) return;
+        final value = _input.value;
+        final start = value.selection.isValid
+            ? value.selection.start
+            : value.text.length;
+        final end = value.selection.isValid
+            ? value.selection.end
+            : value.text.length;
+        _input.value = TextEditingValue(
+          text: value.text.replaceRange(start, end, data!.text!),
+          selection: TextSelection.collapsed(offset: start + data.text!.length),
+        );
+      }
+    } catch (_) {
+      if (mounted) _showError('无法粘贴文件或图片，请重新复制后重试，也可使用附件按钮');
+    } finally {
+      _pasting = false;
+    }
+  }
+
+  Future<void> _insertKeyboardContent(KeyboardInsertedContent content) async {
+    final peerId = widget.peerId;
+    final store = context.read<AppStore>();
+    final outbox = context.read<Outbox>();
+    try {
+      final data = content.data;
+      final paths = data != null && data.isNotEmpty
+          ? [await ClipboardAttachments.saveImage(store, data)]
+          : await ClipboardAttachments.importFiles(store, [content.uri]);
+      if (!mounted || widget.peerId != peerId) return;
+      for (final path in paths) {
+        await _queueFile(outbox, peerId, path);
+      }
+    } catch (_) {
+      if (mounted) _showError('无法读取键盘中的图片，请重新复制后粘贴');
+    }
+  }
+
+  void _insertNewline() {
+    final value = _input.value;
+    final start = value.selection.isValid
+        ? value.selection.start
+        : value.text.length;
+    final end = value.selection.isValid
+        ? value.selection.end
+        : value.text.length;
+    _input.value = TextEditingValue(
+      text: value.text.replaceRange(start, end, '\n'),
+      selection: TextSelection.collapsed(offset: start + 1),
+    );
+  }
+
+  KeyEventResult _onComposerKey(FocusNode node, KeyEvent event) {
+    final enter =
+        event.logicalKey == LogicalKeyboardKey.enter ||
+        event.logicalKey == LogicalKeyboardKey.numpadEnter;
+    if (!enter || (event is! KeyDownEvent && event is! KeyRepeatEvent)) {
+      return KeyEventResult.ignored;
+    }
+    // Let the IME commit a selected Chinese/Japanese candidate first.
+    if (_input.value.composing.isValid && !_input.value.composing.isCollapsed) {
+      return KeyEventResult.ignored;
+    }
+    if (event is KeyRepeatEvent) return KeyEventResult.handled;
+    final keyboard = HardwareKeyboard.instance;
+    if (keyboard.isShiftPressed || keyboard.isControlPressed) {
+      _insertNewline();
+    } else {
+      _send();
+    }
+    return KeyEventResult.handled;
+  }
+
   Widget _inputBar(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(10),
-      child: Row(
-        children: [
-          IconButton(
-            icon: const Icon(Icons.attach_file),
-            tooltip: '选择文件',
-            onPressed: _pickFiles,
+    final scheme = Theme.of(context).colorScheme;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      color: ChatPalette.of(context).canvas,
+      padding: const EdgeInsets.fromLTRB(18, 12, 18, 16),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        decoration: BoxDecoration(
+          color: scheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: _composerFocused
+                ? scheme.primary.withValues(alpha: .7)
+                : scheme.outlineVariant,
           ),
-          IconButton(
-            icon: const Icon(Icons.code),
-            isSelected: _codeMode,
-            tooltip: _codeMode ? '切换为普通文字' : '切换为代码消息',
-            onPressed: () => setState(() => _codeMode = !_codeMode),
-          ),
-          const SizedBox(width: 4),
-          Expanded(
-            child: CallbackShortcuts(
-              bindings: {
-                const SingleActivator(LogicalKeyboardKey.enter, control: true):
-                    _send,
-                const SingleActivator(LogicalKeyboardKey.enter, meta: true):
-                    _send,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: dark ? .12 : .025),
+              blurRadius: 16,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (_codeMode)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: Row(
+                  children: [
+                    Icon(Icons.code_rounded, color: scheme.primary, size: 15),
+                    const SizedBox(width: 6),
+                    Text(
+                      '代码片段',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: scheme.primary,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '保留缩进与空行',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            Actions(
+              actions: <Type, Action<Intent>>{
+                PasteTextIntent: CallbackAction<PasteTextIntent>(
+                  onInvoke: (_) {
+                    _paste();
+                    return null;
+                  },
+                ),
               },
-              child: TextField(
-                controller: _input,
-                minLines: 1,
-                maxLines: 8,
-                keyboardType: TextInputType.multiline,
-                textInputAction: TextInputAction.newline,
-                style: _codeMode
-                    ? const TextStyle(fontFamily: 'monospace')
-                    : null,
-                decoration: InputDecoration(
-                  hintText: Platform.isAndroid
-                      ? (_codeMode ? '粘贴代码，保留缩进' : '输入消息，回车换行')
-                      : (_codeMode
-                            ? '粘贴代码，⌘/Ctrl+Enter 发送'
-                            : '输入消息，回车换行，⌘/Ctrl+Enter 发送'),
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 11,
+              child: Focus(
+                onKeyEvent: _onComposerKey,
+                onFocusChange: (focused) =>
+                    setState(() => _composerFocused = focused),
+                child: TextField(
+                  key: const ValueKey('message-composer'),
+                  controller: _input,
+                  contentInsertionConfiguration: ContentInsertionConfiguration(
+                    allowedMimeTypes: const ['image/*'],
+                    onContentInserted: _insertKeyboardContent,
                   ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
+                  contextMenuBuilder: (context, editable) =>
+                      AdaptiveTextSelectionToolbar.buttonItems(
+                        anchors: editable.contextMenuAnchors,
+                        buttonItems: [
+                          ...editable.contextMenuButtonItems.where(
+                            (item) => item.type != ContextMenuButtonType.paste,
+                          ),
+                          ContextMenuButtonItem(
+                            label: '粘贴',
+                            type: ContextMenuButtonType.paste,
+                            onPressed: () {
+                              editable.hideToolbar();
+                              _paste();
+                            },
+                          ),
+                        ],
+                      ),
+                  autofocus: !Platform.isAndroid,
+                  minLines: 2,
+                  maxLines: 8,
+                  keyboardType: TextInputType.multiline,
+                  textInputAction: TextInputAction.send,
+                  onSubmitted: (_) => _send(),
+                  style: TextStyle(
+                    fontSize: 14,
+                    height: 1.55,
+                    fontFamily: _codeMode
+                        ? (Platform.isMacOS
+                              ? 'Menlo'
+                              : Platform.isWindows
+                              ? 'Consolas'
+                              : 'monospace')
+                        : null,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: _codeMode ? '在这里粘贴代码…' : '发送消息、链接，或粘贴文件与图片…',
+                    filled: false,
+                    contentPadding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
                   ),
                 ),
               ),
             ),
-          ),
-          const SizedBox(width: 8),
-          IconButton.filled(
-            icon: const Icon(Icons.send, size: 18),
-            tooltip: '发送',
-            onPressed: _savingText ? null : _send,
-          ),
-        ],
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+              child: LayoutBuilder(
+                builder: (context, constraints) => Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(
+                        Icons.add_circle_outline_rounded,
+                        size: 21,
+                      ),
+                      tooltip: '选择文件',
+                      onPressed: _pickFiles,
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.code_rounded, size: 21),
+                      isSelected: _codeMode,
+                      color: _codeMode ? scheme.primary : null,
+                      tooltip: _codeMode ? '切换为普通文字' : '切换为代码消息',
+                      onPressed: () => setState(() => _codeMode = !_codeMode),
+                    ),
+                    if (Platform.isAndroid)
+                      IconButton(
+                        icon: const Icon(
+                          Icons.keyboard_return_rounded,
+                          size: 19,
+                        ),
+                        tooltip: '换行',
+                        onPressed: _insertNewline,
+                      ),
+                    const Spacer(),
+                    if (constraints.maxWidth > 470) ...[
+                      Text(
+                        'Enter 发送 · Shift/Ctrl+Enter 换行',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                    ],
+                    Tooltip(
+                      message: '发送',
+                      child: FilledButton.icon(
+                        onPressed: _savingText ? null : _send,
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 10,
+                          ),
+                          minimumSize: const Size(0, 36),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        icon: const Icon(Icons.arrow_upward_rounded, size: 16),
+                        label: const Text('发送', style: TextStyle(fontSize: 12)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

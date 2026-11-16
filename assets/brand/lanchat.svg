@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>LanChat</title>
+  <desc>Two interlocking chat bubbles connect nearby devices.</desc>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3974F8"/>
+      <stop offset="0.55" stop-color="#2858D6"/>
+      <stop offset="1" stop-color="#118F8C"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#163B72" flood-opacity="0.16"/>
+    </filter>
+  </defs>
+  <rect x="96" y="96" width="832" height="832" rx="190" fill="url(#tile)" filter="url(#shadow)"/>
+  <rect x="97" y="97" width="830" height="830" rx="189" fill="none" stroke="#FFFFFF" stroke-opacity="0.16" stroke-width="2"/>
+  <g fill="none" stroke-width="64" stroke-linecap="round" stroke-linejoin="round">
+    <path id="peer" stroke="#8EF0DA" d="M 462 450 H 702 Q 786 450 786 534 V 590 Q 786 674 702 674 H 694 V 756 L 586 674 H 462 Q 378 674 378 590 V 534 Q 378 450 462 450 Z"/>
+    <path id="chat" stroke="#FFFFFF" d="M 322 274 H 562 Q 646 274 646 358 V 414 Q 646 498 562 498 H 438 L 330 580 V 498 H 322 Q 238 498 238 414 V 358 Q 238 274 322 274 Z"/>
+  </g>
+</svg>
