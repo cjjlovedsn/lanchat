@@ -11,6 +11,13 @@ class MainFlutterWindow: NSWindow {
     startupChannel?.invokeMethod("toggle", arguments: nil)
   }
 
+  // Keep the engine and LAN listener alive even when a native/AX close path
+  // bypasses window_manager's windowShouldClose interception. Quit and the
+  // updater still use NSApp.terminate and are unaffected.
+  override func close() {
+    self.orderOut(nil)
+  }
+
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
     let windowFrame = self.frame

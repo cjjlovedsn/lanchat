@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -15,6 +16,10 @@ class ChatsModel extends ChangeNotifier {
   final Map<String, List<ChatMessage>> _history = {};
   final Map<String, int> unread = {};
   String? activePeerId;
+  final Map<String, ({String text, bool codeMode})> drafts = {};
+  bool isForeground = true;
+  final _incoming = StreamController<IncomingChat>.broadcast(sync: true);
+  Stream<IncomingChat> get incoming => _incoming.stream;
 
   ChatsModel(this.store);
 
@@ -62,11 +67,12 @@ class ChatsModel extends ChangeNotifier {
     if (list.any((m) => m.id == msg.id)) return;
     list.add(msg);
     store.appendHistory(peerId, msg.toJson());
-    if (activePeerId != peerId) {
+    if (!isForeground || activePeerId != peerId) {
       unread[peerId] = (unread[peerId] ?? 0) + 1;
       _saveUnread();
     }
     notifyListeners();
+    _incoming.add(IncomingChat(peerId, msg));
   }
 
   void recordAck(String peerId, ChatMessage msg) {
@@ -94,9 +100,32 @@ class ChatsModel extends ChangeNotifier {
 
   void openChat(String peerId) {
     activePeerId = peerId;
-    unread[peerId] = 0;
-    _saveUnread();
+    if (isForeground) {
+      unread[peerId] = 0;
+      _saveUnread();
+    }
     notifyListeners();
+  }
+
+  void closeChat() {
+    activePeerId = null;
+  }
+
+  void setForeground(bool value) {
+    if (isForeground == value) return;
+    isForeground = value;
+    final peer = activePeerId;
+    if (value && peer != null && (unread[peer] ?? 0) > 0) {
+      unread[peer] = 0;
+      _saveUnread();
+    }
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _incoming.close();
+    super.dispose();
   }
 
   int get totalUnread => unread.values.fold(0, (a, b) => a + b);
@@ -124,4 +153,10 @@ List<ChatMessage> mergedChatView(
     return a.$2.compareTo(b.$2);
   });
   return [for (final e in all) e.$1];
+}
+
+class IncomingChat {
+  final String peerId;
+  final ChatMessage message;
+  const IncomingChat(this.peerId, this.message);
 }

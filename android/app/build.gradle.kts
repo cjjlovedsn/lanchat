@@ -25,6 +25,7 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
@@ -93,4 +94,8 @@ tasks.matching { it.name == "validateSigningRelease" }.configureEach {
             "Release certificate changed. Do not distribute an APK that cannot update existing installations."
         }
     }
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }

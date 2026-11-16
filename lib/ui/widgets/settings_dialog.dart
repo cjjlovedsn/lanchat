@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../../core/config.dart';
 import '../../core/constants.dart';
 import '../../core/startup.dart';
+import '../../core/message_alerts.dart';
 import '../../core/app_updates.dart';
 import 'update_dialog.dart';
 import '../../core/storage_perm.dart';
@@ -96,6 +97,72 @@ Future<void> showSettingsDialog(BuildContext context) async {
                         value: updates.autoCheck,
                         onChanged: updates.setAutoCheck,
                       ),
+                    ],
+                  ),
+                ),
+                Consumer2<Config, MessageAlerts>(
+                  builder: (context, config, alerts, _) => Column(
+                    children: [
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text(
+                          '新消息提醒',
+                          style: TextStyle(fontSize: 14),
+                        ),
+                        subtitle: Text(
+                          alerts.permissionGranted == true
+                              ? '系统通知已允许；点击提示打开对应会话'
+                              : '当前聊天不重复提醒；点击提示打开对应会话',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        value: config.notifyNewMessages,
+                        onChanged: (value) async {
+                          try {
+                            await config.update(notifyNewMessages: value);
+                            if (value) await alerts.requestPermission();
+                          } catch (_) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('无法保存提醒设置')),
+                              );
+                            }
+                          }
+                        },
+                      ),
+                      if (K.isDesktop)
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text(
+                            '未读消息时闪烁托盘图标',
+                            style: TextStyle(fontSize: 14),
+                          ),
+                          value: config.flashTrayOnMessage,
+                          onChanged: (value) async {
+                            try {
+                              await config.update(flashTrayOnMessage: value);
+                            } catch (_) {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('无法保存托盘设置')),
+                                );
+                              }
+                            }
+                          },
+                        ),
+                      if (alerts.error != null)
+                        Text(
+                          alerts.error!,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      if (config.notifyNewMessages &&
+                          alerts.permissionGranted == false)
+                        TextButton(
+                          onPressed: alerts.requestPermission,
+                          child: const Text('检查通知权限'),
+                        ),
                     ],
                   ),
                 ),

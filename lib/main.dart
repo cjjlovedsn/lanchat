@@ -8,6 +8,7 @@ import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'core/config.dart';
+import 'core/message_alerts.dart';
 import 'core/app_updates.dart';
 import 'core/startup.dart';
 import 'core/constants.dart';
@@ -50,6 +51,29 @@ Future<void> main() async {
   await peers.start();
   final chats = ChatsModel(store);
   await chats.load();
+  chats.setForeground(false);
+  if (K.isDesktop) {
+    try {
+      await trayManager.setIcon(
+        Platform.isWindows
+            ? 'assets/tray_icon.ico'
+            : Platform.isMacOS
+            ? 'assets/tray_icon_template.png'
+            : 'assets/tray_icon.png',
+        isTemplate: Platform.isMacOS,
+      );
+      await trayManager.setToolTip(K.appName);
+    } catch (_) {}
+  }
+
+  final alerts = MessageAlerts(
+    chats: chats,
+    peers: peers,
+    config: config,
+    notifications: SystemMessageNotifications(),
+    tray: K.isDesktop ? FlashingTray() : null,
+  );
+  await alerts.initialize();
   final transfers = TransfersModel();
   final outbox = Outbox(
     store: store,
@@ -112,20 +136,6 @@ Future<void> main() async {
     );
   }
 
-  if (K.isDesktop) {
-    try {
-      await trayManager.setIcon(
-        Platform.isWindows
-            ? 'assets/tray_icon.ico'
-            : Platform.isMacOS
-            ? 'assets/tray_icon_template.png'
-            : 'assets/tray_icon.png',
-        isTemplate: Platform.isMacOS,
-      );
-      await trayManager.setToolTip(K.appName);
-    } catch (_) {}
-  }
-
   runApp(
     LanChatApp(
       store: store,
@@ -138,6 +148,7 @@ Future<void> main() async {
       startup: startup,
       windowTitle: windowTitle,
       updates: updates,
+      alerts: alerts,
     ),
   );
 }
@@ -153,6 +164,7 @@ class LanChatApp extends StatelessWidget {
   final StartupService startup;
   final String windowTitle;
   final AppUpdates updates;
+  final MessageAlerts alerts;
 
   const LanChatApp({
     super.key,
@@ -166,6 +178,7 @@ class LanChatApp extends StatelessWidget {
     required this.startup,
     this.windowTitle = K.appName,
     required this.updates,
+    required this.alerts,
   });
 
   @override
@@ -173,6 +186,7 @@ class LanChatApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         Provider<AppStore>.value(value: store),
+        ChangeNotifierProvider<MessageAlerts>.value(value: alerts),
         ChangeNotifierProvider<AppUpdates>.value(value: updates),
         ChangeNotifierProvider<StartupService>.value(value: startup),
         ChangeNotifierProvider<Discovery>.value(value: discovery),

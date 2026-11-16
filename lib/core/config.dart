@@ -18,6 +18,8 @@ class Config extends ChangeNotifier {
   String nickname;
   String? downloadDir; // null → store.defaultDownloadsDir
   bool autoAccept;
+  bool notifyNewMessages;
+  bool flashTrayOnMessage;
   AppAppearance appearance;
   AppAccent accent;
   int tcpPort; // actual bound port (bumped if taken, e.g. 2nd local instance)
@@ -31,6 +33,8 @@ class Config extends ChangeNotifier {
     this.tcpPort, {
     this.appearance = AppAppearance.system,
     this.accent = AppAccent.ocean,
+    this.notifyNewMessages = true,
+    this.flashTrayOnMessage = true,
   });
 
   static Future<Config> load(File file) async {
@@ -49,6 +53,8 @@ class Config extends ChangeNotifier {
       j?['downloadDir'] as String?,
       j?['autoAccept'] as bool? ?? true,
       (j?['tcpPort'] as int?) ?? K.tcpPort,
+      notifyNewMessages: j?['notifyNewMessages'] as bool? ?? true,
+      flashTrayOnMessage: j?['flashTrayOnMessage'] as bool? ?? true,
       appearance: AppAppearance.values.firstWhere(
         (v) => v.name == j?['appearance'],
         orElse: () => AppAppearance.system,
@@ -88,6 +94,8 @@ class Config extends ChangeNotifier {
         'nickname': nickname,
         'downloadDir': downloadDir,
         'autoAccept': autoAccept,
+        'notifyNewMessages': notifyNewMessages,
+        'flashTrayOnMessage': flashTrayOnMessage,
         'tcpPort': tcpPort,
         'appearance': appearance.name,
         'accent': accent.name,
@@ -99,6 +107,8 @@ class Config extends ChangeNotifier {
     String? nickname,
     String? downloadDir,
     bool? autoAccept,
+    bool? notifyNewMessages,
+    bool? flashTrayOnMessage,
     bool downloadDirSet = false,
     AppAppearance? appearance,
     AppAccent? accent,
@@ -108,6 +118,10 @@ class Config extends ChangeNotifier {
     }
     if (downloadDirSet) this.downloadDir = downloadDir;
     if (autoAccept != null) this.autoAccept = autoAccept;
+    if (notifyNewMessages != null) this.notifyNewMessages = notifyNewMessages;
+    if (flashTrayOnMessage != null) {
+      this.flashTrayOnMessage = flashTrayOnMessage;
+    }
     if (appearance != null) this.appearance = appearance;
     if (accent != null) this.accent = accent;
     await save();

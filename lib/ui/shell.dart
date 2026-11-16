@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -6,6 +7,9 @@ import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../core/constants.dart';
+import '../core/config.dart';
+import '../core/message_alerts.dart';
+import '../state/peers_model.dart';
 import '../core/startup.dart';
 import '../core/app_updates.dart';
 import 'widgets/update_dialog.dart';
@@ -22,8 +26,108 @@ class ShellPage extends StatefulWidget {
 }
 
 class _ShellPageState extends State<ShellPage>
-    with WindowListener, TrayListener {
+    with WindowListener, TrayListener, WidgetsBindingObserver {
   String? selectedPeerId;
+  ChatsModel? _chats;
+  MessageAlerts? _alerts;
+  int _foregroundEpoch = 0;
+  Timer? _focusReadTimer;
+  bool _appResumed = true;
+
+  Future<void> _syncForeground() async {
+    final epoch = ++_foregroundEpoch;
+    _focusReadTimer?.cancel();
+    var foreground = _appResumed;
+    if (K.isDesktop) {
+      try {
+        final state = await Future.wait([
+          windowManager.isVisible(),
+          windowManager.isFocused(),
+          windowManager.isMinimized(),
+        ]);
+        foreground = foreground && state[0] && state[1] && !state[2];
+      } catch (_) {
+        foreground = false;
+      }
+    }
+    if (!mounted || epoch != _foregroundEpoch) return;
+    if (foreground) {
+      // Notification activation can focus the old pane just before its payload
+      // reaches Dart. Allow routing to settle before marking a conversation read.
+      _focusReadTimer = Timer(const Duration(milliseconds: 150), () {
+        if (mounted && epoch == _foregroundEpoch) _chats?.setForeground(true);
+      });
+    } else {
+      _chats?.setForeground(false);
+    }
+  }
+
+  void _background() {
+    _foregroundEpoch++;
+    _focusReadTimer?.cancel();
+    _chats?.setForeground(false);
+  }
+
+  @override
+  void onWindowFocus() => unawaited(_syncForeground());
+  @override
+  void onWindowBlur() => _background();
+  @override
+  void onWindowMinimize() => _background();
+  @override
+  void onWindowRestore() => unawaited(_syncForeground());
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _appResumed = state == AppLifecycleState.resumed;
+    if (_appResumed) {
+      _syncForeground();
+    } else {
+      _background();
+    }
+  }
+
+  void _showInAppAlert(String peer, String title, String preview) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || (_chats?.unread[peer] ?? 0) == 0) return;
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 5),
+          content: InkWell(
+            onTap: () {
+              messenger.hideCurrentSnackBar();
+              _openFromAlert(peer);
+            },
+            child: Text(
+              '$title：$preview',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          action: SnackBarAction(
+            label: '查看',
+            onPressed: () => _openFromAlert(peer),
+          ),
+        ),
+      );
+    });
+  }
+
+  Future<void> _openFromAlert(String peer) async {
+    if (!mounted) return;
+    // Select before focus: focusing must not mark the previously selected chat read.
+    if (context.read<PeersModel>().byId(peer) != null) {
+      _select(peer);
+    }
+    await _show();
+  }
+
+  void _backToPeers() {
+    setState(() => selectedPeerId = null);
+    _chats?.closeChat();
+  }
+
   StartupService? _startup;
   String? _lastStartupError;
   AppUpdates? _updates;
@@ -51,6 +155,20 @@ class _ShellPageState extends State<ShellPage>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (_alerts == null) {
+      _chats = context.read<ChatsModel>();
+      _alerts = context.read<MessageAlerts>();
+      _alerts!.onOpenChat = (peer) => _openFromAlert(peer);
+      _alerts!.onInAppAlert = _showInAppAlert;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _syncForeground();
+        _alerts!.consumeLaunchTap();
+        if (context.read<Config>().notifyNewMessages) {
+          _alerts!.requestPermission();
+        }
+      });
+    }
     if (_updates == null) {
       _updates = context.read<AppUpdates>();
       _updates!.addListener(_onUpdate);
@@ -102,6 +220,10 @@ class _ShellPageState extends State<ShellPage>
   @override
   void initState() {
     super.initState();
+    _appResumed =
+        WidgetsBinding.instance.lifecycleState == null ||
+        WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+    WidgetsBinding.instance.addObserver(this);
     if (!K.isDesktop) return;
     windowManager.addListener(this);
     trayManager.addListener(this);
@@ -110,6 +232,12 @@ class _ShellPageState extends State<ShellPage>
 
   @override
   void dispose() {
+    _focusReadTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    _chats?.closeChat();
+    _chats?.setForeground(false);
+    _alerts?.onOpenChat = null;
+    _alerts?.onInAppAlert = null;
     _startup?.removeListener(_startupChanged);
     _updates?.removeListener(_onUpdate);
     if (K.isDesktop) {
@@ -121,11 +249,19 @@ class _ShellPageState extends State<ShellPage>
 
   @override
   void onWindowClose() async {
+    _background();
     await windowManager.hide(); // stay resident so the outbox can flush
   }
 
   @override
-  void onTrayIconMouseDown() => _show();
+  void onTrayIconMouseDown() {
+    final peer = _alerts?.latestUnreadPeer;
+    if (peer != null) {
+      _openFromAlert(peer);
+    } else {
+      _show();
+    }
+  }
 
   @override
   void onTrayIconRightMouseDown() async {
@@ -157,9 +293,12 @@ class _ShellPageState extends State<ShellPage>
     _updateDialogOpen = false;
   }
 
-  void _show() async {
+  Future<void> _show() async {
+    if (!K.isDesktop) return;
+    if (await windowManager.isMinimized()) await windowManager.restore();
     await windowManager.show();
     await windowManager.focus();
+    await _syncForeground();
   }
 
   void _select(String peerId) {
@@ -178,10 +317,7 @@ class _ShellPageState extends State<ShellPage>
     final body = narrow
         ? (selectedPeerId == null
               ? list
-              : ChatView(
-                  peerId: selectedPeerId!,
-                  onBack: () => setState(() => selectedPeerId = null),
-                ))
+              : ChatView(peerId: selectedPeerId!, onBack: _backToPeers))
         : Row(
             children: [
               SizedBox(width: 308, child: list),
@@ -189,7 +325,10 @@ class _ShellPageState extends State<ShellPage>
               Expanded(
                 child: selectedPeerId == null
                     ? const _EmptyView()
-                    : ChatView(peerId: selectedPeerId!),
+                    : ChatView(
+                        key: ValueKey(selectedPeerId),
+                        peerId: selectedPeerId!,
+                      ),
               ),
             ],
           );

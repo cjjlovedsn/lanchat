@@ -40,9 +40,29 @@ class _ChatViewState extends State<ChatView> {
   int _lastCount = 0;
   final Set<String> _selected = {};
   bool _selecting = false;
+  late final ChatsModel _draftStore;
+
+  @override
+  void initState() {
+    super.initState();
+    _draftStore = context.read<ChatsModel>();
+    final draft = _draftStore.drafts[widget.peerId];
+    if (draft != null) {
+      _input.text = draft.text;
+      _codeMode = draft.codeMode;
+    }
+  }
 
   @override
   void dispose() {
+    if (_input.text.isEmpty) {
+      _draftStore.drafts.remove(widget.peerId);
+    } else {
+      _draftStore.drafts[widget.peerId] = (
+        text: _input.text,
+        codeMode: _codeMode,
+      );
+    }
     _input.dispose();
     _scroll.dispose();
     super.dispose();

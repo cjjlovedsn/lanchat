@@ -148,6 +148,11 @@ def generate_platforms(icon,glyph):
     monochrome.thumbnail((28,28),Image.Resampling.LANCZOS)
     tray=Image.new('RGBA',(32,32));tray.alpha_composite(monochrome,((32-monochrome.width)//2,(32-monochrome.height)//2))
     tray.save(ROOT/'assets/tray_icon_template.png')
+    # Dim instead of removing the status item so the click target stays stable.
+    dim=tray.copy();dim.putalpha(dim.getchannel('A').point(lambda a: round(a*.12)))
+    dim.save(ROOT/'assets/tray_icon_dim.png')
+    dim_icon=icon.copy();dim_icon.putalpha(dim_icon.getchannel('A').point(lambda a: round(a*.12)))
+    dim_icon.save(ROOT/'assets/tray_icon_dim.ico',format='ICO',sizes=ico_sizes)
     for density,size,foreground in [('mdpi',48,108),('hdpi',72,162),('xhdpi',96,216),('xxhdpi',144,324),('xxxhdpi',192,432)]:
         target=ROOT/f'android/app/src/main/res/mipmap-{density}'
         save_png(icon,target/'ic_launcher.png',size)
