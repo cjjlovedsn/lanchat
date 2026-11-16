@@ -257,7 +257,13 @@ class _ChatViewState extends State<ChatView> {
   Future<void> _pickFiles() async {
     final outbox = context.read<Outbox>();
     final peerId = widget.peerId;
-    final res = await FilePicker.pickFiles(allowMultiple: true);
+    FilePickerResult? res;
+    try {
+      res = await FilePicker.pickFiles(allowMultiple: true);
+    } catch (_) {
+      if (mounted) _showError('无法打开文件选择器，请检查应用文件访问权限；也可将文件拖入聊天窗口');
+      return;
+    }
     if (res == null) return;
     for (final f in res.files) {
       final path = f.path;
