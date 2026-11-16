@@ -1,0 +1,19 @@
+LanChat macOS 安装与发布
+
+Release 中同时保留 lanchat-macos.dmg 和 lanchat-macos.zip，并附带 SHA256SUMS.txt。
+推荐下载 DMG，打开后把 lanchat.app 拖入旁边的 Applications（应用程序）快捷方式。
+安装后推出磁盘映像，再从“应用程序”启动 LanChat。
+
+首次从下载目录、DMG 或其他未安装位置启动时，会显示一次原生安装提示。
+“打开安装位置”会在访达中显示应用和“应用程序”文件夹；“继续使用”会继续运行。
+已经安装到系统 /Applications 或用户 ~/Applications 时不提示，Debug 构建不提示。
+更新前先退出旧版，再替换应用文件。
+
+本机检查与打包：
+    test/macos_install_hint/run.sh
+    flutter build macos --release
+    scripts/package-macos-release.sh
+
+打包脚本会校验应用签名和 DMG，并为 DMG、ZIP 生成 SHA-256。
+GitHub Actions 的 macOS 构建失败时，整次发布会停止，避免缺少 Mac 附件。
+发布仍按 AGENTS.md 规定，需要明确的提交、推送和发版授权。

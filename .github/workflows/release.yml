@@ -64,8 +64,8 @@ jobs:
           if-no-files-found: error
 
   build-macos:
-    runs-on: macos-latest
-    continue-on-error: true # unsigned build may fail; release goes out without it
+    # Keep Flutter 3.35 compatible with the original macOS 10.15 deployment target.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
@@ -73,11 +73,11 @@ jobs:
           flutter-version: '3.35.6'
           channel: stable
       - run: flutter pub get
+      - name: Check first-launch installation hint
+        run: test/macos_install_hint/run.sh
       - run: flutter build macos --release
-      - run: |
-          mkdir -p dist
-          ditto -c -k --sequesterRsrc --keepParent \
-            build/macos/Build/Products/Release/lanchat.app dist/lanchat-macos.zip
+      - name: Package DMG and ZIP
+        run: scripts/package-macos-release.sh
       - uses: actions/upload-artifact@v4
         with:
           name: dist-macos
@@ -96,3 +96,7 @@ jobs:
         with:
           files: artifacts/**/*
           generate_release_notes: true
+          body: |
+            macOS 推荐下载 lanchat-macos.dmg，打开后把应用拖入 Applications（应用程序），再从“应用程序”启动。
+            lanchat-macos.zip 继续保留；同时提供 SHA256SUMS.txt 校验文件。
+            首次从下载目录或 DMG 运行时，会显示移到“应用程序”的提示。
