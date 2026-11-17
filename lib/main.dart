@@ -18,6 +18,7 @@ import 'core/store.dart';
 import 'core/transfer_client.dart';
 import 'core/transfer_server.dart';
 import 'core/shared_folders.dart';
+import 'core/desktop_instance.dart';
 import 'state/chats_model.dart';
 import 'state/peers_model.dart';
 import 'state/transfers_model.dart';
@@ -25,8 +26,31 @@ import 'ui/shell.dart';
 import 'ui/app_theme.dart';
 import 'ui/widgets/video_poster.dart';
 
+// Keep the OS lock and activation listener alive for the process lifetime.
+DesktopInstance? _desktopInstance;
+bool _desktopWindowReady = false;
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (K.isDesktop) await windowManager.ensureInitialized();
+  final store = await AppStore.create();
+  if (K.isDesktop) {
+    try {
+      _desktopInstance = await DesktopInstance.acquire(
+        store.base,
+        onActivate: () async {
+          if (!_desktopWindowReady) return; // The initial startup will show it.
+          if (await windowManager.isMinimized()) await windowManager.restore();
+          await windowManager.show();
+          await windowManager.focus();
+        },
+      );
+      if (_desktopInstance == null) exit(0);
+    } catch (error) {
+      stderr.writeln('LanChat 启动失败：$error');
+      exit(1); // Never fall through to a second writer of chat/config data.
+    }
+  }
   MediaKit.ensureInitialized();
   VideoPosters.enabled = true;
   var windowTitle = K.appName;
@@ -38,13 +62,8 @@ Future<void> main() async {
   } catch (_) {
     // Metadata failure must not prevent chat or file transfer from starting.
   }
-  if (K.isDesktop) {
-    await windowManager.ensureInitialized();
-  }
-
   final startup = StartupService();
   await startup.initialize();
-  final store = await AppStore.create();
   final config = await Config.load(store.configFile);
   final updates = AppUpdates(store: store, currentVersion: currentVersion)
     ..start();
@@ -133,6 +152,7 @@ Future<void> main() async {
         center: true,
       ),
       () async {
+        _desktopWindowReady = true;
         await windowManager.show();
         await windowManager.focus();
       },

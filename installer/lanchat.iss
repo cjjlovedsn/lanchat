@@ -3,7 +3,7 @@
 
 #define MyAppName "LanChat"
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0.15"
+  #define MyAppVersion "1.0.16"
 #endif
 #define MyAppExeName "lanchat.exe"
 
@@ -23,6 +23,12 @@ WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 UninstallDisplayIcon={app}\{#MyAppExeName}
+; Older versions may hide instead of exiting on a close request. Restart
+; Manager must be allowed to terminate a process that still holds app files.
+CloseApplications=force
+CloseApplicationsFilter=*.exe,*.dll
+; The post-install Run entry is the sole restart path (avoids duplicate starts).
+RestartApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
