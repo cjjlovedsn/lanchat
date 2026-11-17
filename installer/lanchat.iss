@@ -3,7 +3,7 @@
 
 #define MyAppName "LanChat"
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0.12"
+  #define MyAppVersion "1.0.14"
 #endif
 #define MyAppExeName "lanchat.exe"
 
@@ -15,7 +15,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=..\dist
-OutputBaseFilename=lanchat-setup
+OutputBaseFilename=lanchat-setup-{#MyAppVersion}
 SetupIconFile=..\assets\tray_icon.ico
 Compression=lzma2/max
 SolidCompression=yes

@@ -13,12 +13,15 @@ import '../core/message_text.dart';
 import '../core/outbox.dart';
 import '../core/storage_perm.dart';
 import '../core/store.dart';
+import '../core/shared_folders.dart';
 import '../core/util.dart';
 import '../models/message.dart';
+import '../models/shared_folder.dart';
 import '../state/chats_model.dart';
 import '../state/peers_model.dart';
 import 'widgets/bubble.dart';
 import 'app_theme.dart';
+import 'shared_folders_page.dart';
 
 class ChatView extends StatefulWidget {
   final String peerId;
@@ -111,7 +114,7 @@ class _ChatViewState extends State<ChatView> {
         constraints: const BoxConstraints(maxWidth: 440),
         title: const Text('清空当前聊天？'),
         content: const Text(
-          '将清空本机当前会话的聊天记录，并移除待发送消息。已接收的文件会保留，对方的记录不受影响。正在传输的内容可能已送达。',
+          '将清空本机当前会话的聊天记录，并移除待发送消息。已接收的文件会保留，对方的记录不受影响。正在传输的内容可能已送达。文件夹共享不会取消，可在“共享文件夹”中管理。',
         ),
         actions: [
           TextButton(
@@ -465,6 +468,19 @@ class _ChatViewState extends State<ChatView> {
     }
     return MessageBubble(
       msg: msg,
+      onOpenSharedFolder: () {
+        final invite = FolderInvite.parse(msg.text);
+        if (invite == null || context.read<SharedFolders?>() == null) return;
+        if (msg.outgoing) {
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => SharedFoldersPage(peerId: widget.peerId),
+            ),
+          );
+        } else {
+          openSharedFolder(context, widget.peerId, invite);
+        }
+      },
       onLongPressStart: (d) => _showMsgMenu(msg, d.globalPosition),
       onSecondaryTapUp: (d) => _showMsgMenu(msg, d.globalPosition),
     );
@@ -580,6 +596,16 @@ class _ChatViewState extends State<ChatView> {
               ],
             ),
           ),
+          if (context.read<SharedFolders?>() != null)
+            IconButton(
+              icon: const Icon(Icons.folder_shared_outlined, size: 20),
+              tooltip: '共享文件夹',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => SharedFoldersPage(peerId: widget.peerId),
+                ),
+              ),
+            ),
           if (!Platform.isAndroid)
             IconButton(
               icon: const Icon(Icons.folder_open_outlined, size: 20),

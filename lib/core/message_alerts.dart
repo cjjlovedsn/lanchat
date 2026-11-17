@@ -10,6 +10,7 @@ import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../models/message.dart';
+import '../models/shared_folder.dart';
 import '../state/chats_model.dart';
 import '../state/peers_model.dart';
 import 'config.dart';
@@ -317,6 +318,8 @@ class MessageAlerts extends ChangeNotifier {
   }
 
   static String preview(ChatMessage message) {
+    final folder = FolderInvite.parse(message.text);
+    if (folder != null) return '[共享文件夹] ${folder.name}';
     if (message.kind == MsgKind.file) {
       return '[文件] ${message.fileName ?? '新文件'}';
     }

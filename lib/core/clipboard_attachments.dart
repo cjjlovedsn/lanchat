@@ -12,14 +12,19 @@ import 'store.dart';
 class ClipboardAttachments {
   static const _native = MethodChannel('lanchat/clipboard');
 
-  static Future<List<String>> read(AppStore store) async {
+  static Future<List<String>> read(
+    AppStore store, {
+    bool allowDirectories = false,
+  }) async {
     final files =
         (Platform.isMacOS
                 ? await _native.invokeListMethod<String>('files') ?? <String>[]
                 : await Pasteboard.files())
             .toSet()
             .toList();
-    if (files.isNotEmpty) return importFiles(store, files);
+    if (files.isNotEmpty) {
+      return importFiles(store, files, allowDirectories: allowDirectories);
+    }
     final image = await Pasteboard.image;
     if (image == null || image.isEmpty) return [];
     return [await saveImage(store, image)];
@@ -27,8 +32,9 @@ class ClipboardAttachments {
 
   static Future<List<String>> importFiles(
     AppStore store,
-    List<String> paths,
-  ) async {
+    List<String> paths, {
+    bool allowDirectories = false,
+  }) async {
     if (Platform.isAndroid) {
       final copied = await _native.invokeListMethod<String>('import', paths);
       paths = copied ?? [];
@@ -47,7 +53,9 @@ class ClipboardAttachments {
       final normalized = path.startsWith('file:')
           ? Uri.parse(path).toFilePath()
           : path;
-      if (!await File(normalized).exists()) {
+      final type = await FileSystemEntity.type(normalized, followLinks: false);
+      if (!await File(normalized).exists() &&
+          !(allowDirectories && type == FileSystemEntityType.directory)) {
         throw const FileSystemException('剪贴板包含不可读取的文件或文件夹');
       }
       result.add(normalized);

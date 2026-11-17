@@ -19,4 +19,11 @@ LanChat macOS 安装说明
 更新前先退出旧版，替换“应用程序”中的应用文件；聊天数据保存在应用支持目录。
 下载更新：https://github.com/cjjlovedsn/lanchat/releases/latest
 INFO
-"$repo_dir/scripts/package-macos.sh" "$stage" "$output" "lanchat-macos" "LanChat"
+version="$(python3 "$repo_dir/scripts/release-version.py")"
+app_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$stage/lanchat.app/Contents/Info.plist")"
+if [[ "$app_version" != "$version" ]]; then
+    echo 'Built Mac application version does not match pubspec.yaml; rebuild before packaging.' >&2
+    exit 1
+fi
+"$repo_dir/scripts/package-macos.sh" "$stage" "$output" "lanchat-macos-$version" "LanChat $version"
+mv "$output/SHA256SUMS.txt" "$output/SHA256SUMS-$version.txt"

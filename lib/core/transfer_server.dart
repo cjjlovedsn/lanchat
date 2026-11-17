@@ -13,6 +13,7 @@ import 'config.dart';
 import 'constants.dart';
 import 'protocol.dart';
 import 'store.dart';
+import 'shared_folders.dart';
 import 'util.dart';
 
 class TransferServer {
@@ -21,6 +22,7 @@ class TransferServer {
   final PeersModel peers;
   final ChatsModel chats;
   final TransfersModel transfers;
+  final SharedFolders? sharedFolders;
   ServerSocket? _srv;
 
   TransferServer({
@@ -29,6 +31,7 @@ class TransferServer {
     required this.peers,
     required this.chats,
     required this.transfers,
+    this.sharedFolders,
   });
 
   Future<void> start() async {
@@ -80,6 +83,11 @@ class TransferServer {
             port: (h.header['port'] as int?) ?? K.tcpPort,
             address: sock.remoteAddress.address,
           );
+        } else if (type == 'shared-folder' &&
+            peerId != null &&
+            sharedFolders != null) {
+          await sharedFolders!.handle(sock, reader, h, peerId);
+          break;
         } else if (type == 'text' && peerId != null) {
           final msgId = h.header['msgId'] as String?;
           if (msgId == null) break;

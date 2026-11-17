@@ -38,15 +38,20 @@ class AppRelease {
     final tag = json['tag_name'] as String? ?? '';
     final version = Version.parse(tag.replaceFirst(RegExp(r'^v'), ''));
     if (version.isPreRelease || version <= Version.parse(current)) return null;
-    final filename = switch (platform) {
+    final legacyFilename = switch (platform) {
       'windows' => 'lanchat-setup.exe',
       'macos' => 'lanchat-macos.dmg',
       'android' => 'lanchat-android.apk',
       _ => throw const FormatException('当前平台不支持应用内更新'),
     };
+    final versionedFilename =
+        '${p.basenameWithoutExtension(legacyFilename)}-$version${p.extension(legacyFilename)}';
     final assets = (json['assets'] as List? ?? []).whereType<Map>();
-    final asset = assets.where((a) => a['name'] == filename).firstOrNull;
+    final asset =
+        assets.where((a) => a['name'] == versionedFilename).firstOrNull ??
+        assets.where((a) => a['name'] == legacyFilename).firstOrNull;
     if (asset == null) throw const FormatException('新版尚未提供当前平台的安装包，请稍后重试');
+    final filename = asset['name'] as String;
     final uri = Uri.parse(asset['browser_download_url'] as String);
     final prefix = '/$updateRepository/releases/download/$tag/';
     if (uri.scheme != 'https' ||
@@ -86,6 +91,7 @@ class AppUpdates extends ChangeNotifier {
   final Uri endpoint;
   final DateTime Function() now;
   bool autoCheck = true;
+  final Set<String> _ignoredVersions = {};
   bool checking = false;
   bool shouldPrompt = false;
   bool downloading = false;
@@ -128,6 +134,8 @@ class AppUpdates extends ChangeNotifier {
   }
 
   bool get busy => checking || downloading || installing;
+  bool get isReleaseIgnored =>
+      release != null && _ignoredVersions.contains(release!.version.toString());
   File get _preferences =>
       File(p.join(store.base.path, 'update-settings.json'));
   Directory get _directory => Directory(p.join(store.base.path, 'updates'));
@@ -135,6 +143,9 @@ class AppUpdates extends ChangeNotifier {
   void start() {
     final prefs = store.readJson(_preferences);
     autoCheck = prefs?['autoCheck'] as bool? ?? true;
+    _ignoredVersions
+      ..clear()
+      ..addAll((prefs?['ignoredVersions'] as List? ?? []).whereType<String>());
     lastCheck = DateTime.tryParse(prefs?['lastCheck'] as String? ?? '');
     _initial = Timer(const Duration(seconds: 10), () => check(automatic: true));
     _periodic = Timer.periodic(
@@ -156,10 +167,37 @@ class AppUpdates extends ChangeNotifier {
     _notify();
   }
 
+  Future<void> setIgnoreRelease(bool value) async {
+    final version = release?.version.toString();
+    if (version == null) return;
+    final previous = _ignoredVersions.contains(version);
+    final previousPrompt = shouldPrompt;
+    if (value) {
+      _ignoredVersions.add(version);
+      shouldPrompt = false;
+    } else {
+      _ignoredVersions.remove(version);
+    }
+    try {
+      _save();
+      error = null;
+    } catch (_) {
+      if (previous) {
+        _ignoredVersions.add(version);
+      } else {
+        _ignoredVersions.remove(version);
+      }
+      shouldPrompt = previousPrompt;
+      error = '无法保存此版本的更新提醒设置';
+    }
+    _notify();
+  }
+
   void _save() => AppStore.writeAtomic(
     _preferences,
     jsonEncode({
       'autoCheck': autoCheck,
+      'ignoredVersions': _ignoredVersions.toList()..sort(),
       'lastCheck': lastCheck?.toIso8601String(),
     }),
   );
@@ -174,7 +212,8 @@ class AppUpdates extends ChangeNotifier {
       ..userAgent = 'LanChat/$currentVersion';
     final proxy = await systemHttpProxy();
     if (proxy != null) {
-      client.findProxy = (uri) => _isLoopback(uri.host) ? 'DIRECT' : 'PROXY $proxy';
+      client.findProxy = (uri) =>
+          _isLoopback(uri.host) ? 'DIRECT' : 'PROXY $proxy';
     }
     return client;
   }
@@ -228,7 +267,7 @@ class AppUpdates extends ChangeNotifier {
       );
       if (release?.version != candidate?.version) downloaded = null;
       release = candidate;
-      shouldPrompt = automatic && candidate != null;
+      shouldPrompt = automatic && candidate != null && !isReleaseIgnored;
     } on FormatException catch (e) {
       error = e.message;
     } catch (_) {

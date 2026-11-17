@@ -27,13 +27,19 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath dist/lanchat-win-x64.zip
+          $ver = python scripts/release-version.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath "dist/lanchat-win-x64-$ver.zip"
       - name: Build installer (Inno Setup)
         shell: pwsh
         run: |
           choco install innosetup -y --no-progress
-          $ver = '${{ github.ref_name }}' -replace '^v',''
+          $ver = python scripts/release-version.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$ver" installer/lanchat.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # Older clients require this exact asset name for in-app updates.
+          Copy-Item "dist/lanchat-setup-$ver.exe" dist/lanchat-setup.exe
       - uses: actions/upload-artifact@v4
         with:
           name: dist-windows
@@ -60,7 +66,10 @@ jobs:
         run: python3 scripts/verify-android-signature.py
       - run: |
           mkdir -p dist
-          cp build/app/outputs/flutter-apk/app-release.apk dist/lanchat-android.apk
+          ver="$(python3 scripts/release-version.py)"
+          cp build/app/outputs/flutter-apk/app-release.apk "dist/lanchat-android-$ver.apk"
+          # Compatibility asset for clients that only recognize the old name.
+          cp "dist/lanchat-android-$ver.apk" dist/lanchat-android.apk
       - uses: actions/upload-artifact@v4
         with:
           name: dist-android
@@ -83,7 +92,11 @@ jobs:
         run: python3 test/macos_updater_test.py
       - run: flutter build macos --release
       - name: Package DMG and ZIP
-        run: scripts/package-macos-release.sh
+        run: |
+          scripts/package-macos-release.sh
+          ver="$(python3 scripts/release-version.py)"
+          # Compatibility asset for clients that only recognize the old name.
+          cp "dist/lanchat-macos-$ver.dmg" dist/lanchat-macos.dmg
       - uses: actions/upload-artifact@v4
         with:
           name: dist-macos
@@ -103,6 +116,10 @@ jobs:
           files: artifacts/**/*
           generate_release_notes: true
           body: |
+            安装包及便携包文件名现在包含版本号，网页下载时请选择带版本号的文件。
+            不带版本号的安装包为旧客户端应用内更新的兼容入口，内容相同。
+            更新提示支持勾选“此版本不再提示更新”；仅忽略所选版本，后续新版本仍会提醒，手动检查不受影响。
+
             修复 Android Build Tools 37 输出格式变化导致的签名校验误报，恢复发布流程。
             保留 APK 完整性及固定发布证书校验，增加真实工具输出回归测试和失败诊断日志。
 
@@ -118,6 +135,6 @@ jobs:
             如果手机已安装不同签名的旧版，需要先保留重要数据，再卸载旧版并重新安装一次；应用不会自动卸载旧版。
             首次升级到支持应用内更新的版本仍需手动安装，后续版本可在应用中更新。
 
-            macOS 推荐下载 lanchat-macos.dmg，打开后把应用拖入 Applications（应用程序），再从“应用程序”启动。
-            lanchat-macos.zip 继续保留；同时提供 SHA256SUMS.txt 校验文件。
+            macOS 推荐下载 lanchat-macos-<版本号>.dmg，打开后把应用拖入 Applications（应用程序），再从“应用程序”启动。
+            lanchat-macos-<版本号>.zip 继续保留；同时提供 SHA256SUMS-<版本号>.txt 校验文件。
             首次从下载目录或 DMG 运行时，会显示移到“应用程序”的提示。

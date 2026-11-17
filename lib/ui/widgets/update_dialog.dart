@@ -64,6 +64,17 @@ Future<void> showUpdateDialog(
                         const Text('安装需要系统确认；若签名不同，会先说明原因。')
                       else
                         const Text('安装时会退出并替换当前应用，请先等待文件传输完成。'),
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        title: const Text('此版本不再提示更新'),
+                        subtitle: const Text('仅忽略此版本，后续新版本仍会提醒；可随时手动检查更新。'),
+                        value: updater.isReleaseIgnored,
+                        onChanged: updater.busy
+                            ? null
+                            : (value) =>
+                                  updater.setIgnoreRelease(value ?? false),
+                      ),
                     ],
                     if (updater.downloading) ...[
                       const SizedBox(height: 16),

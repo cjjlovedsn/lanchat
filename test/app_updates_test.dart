@@ -41,6 +41,7 @@ Map<String, dynamic> metadata(
   List<int> data, {
   String tag = 'v1.0.10',
   String? digest,
+  bool versioned = false,
 }) => {
   'tag_name': tag,
   'body': 'Test release notes',
@@ -48,9 +49,9 @@ Map<String, dynamic> metadata(
   'prerelease': false,
   'assets': [
     for (final name in [
-      'lanchat-setup.exe',
-      'lanchat-macos.dmg',
-      'lanchat-android.apk',
+      'lanchat-setup${versioned ? '-${tag.substring(1)}' : ''}.exe',
+      'lanchat-macos${versioned ? '-${tag.substring(1)}' : ''}.dmg',
+      'lanchat-android${versioned ? '-${tag.substring(1)}' : ''}.apk',
     ])
       {
         'name': name,
@@ -164,6 +165,17 @@ void main() {
     expect(find.text('发现新版本 v1.0.10'), findsOneWidget);
     expect(find.text('下载并安装'), findsOneWidget);
     expect(tester.takeException(), isNull);
+    await tester.ensureVisible(find.text('此版本不再提示更新'));
+    await tester.tap(find.text('此版本不再提示更新'));
+    await tester.pumpAndSettle();
+    expect(updates.isReleaseIgnored, isTrue);
+    expect(
+      store.readJson(
+        File('${temp.path}/update-settings.json'),
+      )!['ignoredVersions'],
+      ['1.0.10'],
+    );
+    expect(tester.takeException(), isNull);
     await tester.tap(find.text('稍后'));
     await tester.pumpAndSettle();
     expect(assetRequests, 0);
@@ -211,6 +223,92 @@ void main() {
       );
     },
   );
+
+  test(
+    'prefers versioned assets on every platform and supports legacy releases',
+    () {
+      final legacy = metadata(bytes);
+      final modern = metadata(bytes, versioned: true);
+      modern['assets'] = [
+        ...legacy['assets'] as List,
+        ...modern['assets'] as List,
+      ];
+      for (final platform in ['windows', 'macos', 'android']) {
+        final selected = AppRelease.parse(modern, platform, '1.0.9')!;
+        expect(selected.filename, contains('-1.0.10.'));
+        expect(selected.url.pathSegments.last, selected.filename);
+        expect(
+          AppRelease.parse(legacy, platform, '1.0.9')!.filename,
+          isNot(contains('-1.0.10.')),
+        );
+      }
+      final asset = (modern['assets'] as List)[3] as Map;
+      asset['browser_download_url'] =
+          'https://github.com/cjjlovedsn/lanchat/releases/download/v1.0.10/lanchat-setup-1.0.11.exe';
+      expect(
+        () => AppRelease.parse(modern, 'windows', '1.0.9'),
+        throwsFormatException,
+      );
+    },
+  );
+
+  test('versioned packages download and verify normally', () async {
+    response = metadata(bytes, versioned: true);
+    await updates.check();
+    await updates.download();
+    expect(updates.error, isNull);
+    expect(updates.downloaded!.path, endsWith('lanchat-setup-1.0.10.exe'));
+    expect(updates.downloaded!.readAsBytesSync(), bytes);
+  });
+
+  test(
+    'ignored version survives restart; manual checks and newer releases still work',
+    () async {
+      await updates.check(automatic: true);
+      await updates.setIgnoreRelease(true);
+      expect(updates.shouldPrompt, isFalse);
+      updates.dispose();
+      final base = Uri.parse('http://127.0.0.1:${server.port}');
+      updates = AppUpdates(
+        store: store,
+        currentVersion: '1.0.9',
+        platform: 'windows',
+        clientFactory: () => _LocalClient(base),
+        now: () => DateTime.now().add(const Duration(hours: 7)),
+      )..start();
+      await updates.check(automatic: true);
+      expect(updates.isReleaseIgnored, isTrue);
+      expect(updates.shouldPrompt, isFalse);
+      await updates.check();
+      expect(updates.release!.version.toString(), '1.0.10');
+      expect(updates.shouldPrompt, isFalse);
+      expect(assetRequests, 0);
+      response = metadata(bytes, tag: 'v1.0.11', versioned: true);
+      updates.lastCheck = null;
+      await updates.check(automatic: true);
+      expect(updates.isReleaseIgnored, isFalse);
+      expect(updates.shouldPrompt, isTrue);
+    },
+  );
+
+  test('unchecking ignored version restores automatic reminders', () async {
+    await updates.check();
+    await updates.setIgnoreRelease(true);
+    await updates.setIgnoreRelease(false);
+    updates.lastCheck = null;
+    await updates.check(automatic: true);
+    expect(updates.shouldPrompt, isTrue);
+    expect(updates.isReleaseIgnored, isFalse);
+  });
+
+  test('failed preference save does not silently ignore a release', () async {
+    await updates.check(automatic: true);
+    Directory('${temp.path}/update-settings.json.tmp').createSync();
+    await updates.setIgnoreRelease(true);
+    expect(updates.error, contains('无法保存'));
+    expect(updates.isReleaseIgnored, isFalse);
+    expect(updates.shouldPrompt, isTrue);
+  });
 
   test(
     'automatic checks throttle and never download; manual checks can retry',

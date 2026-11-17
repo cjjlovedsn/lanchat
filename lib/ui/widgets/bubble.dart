@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/util.dart';
 import '../../models/message.dart';
+import '../../models/shared_folder.dart';
 import '../../state/transfers_model.dart';
 import 'image_viewer.dart';
 import 'message_text.dart';
@@ -16,11 +17,13 @@ class MessageBubble extends StatelessWidget {
   final ChatMessage msg;
   final GestureTapUpCallback? onSecondaryTapUp;
   final GestureLongPressStartCallback? onLongPressStart;
+  final VoidCallback? onOpenSharedFolder;
   const MessageBubble({
     super.key,
     required this.msg,
     this.onSecondaryTapUp,
     this.onLongPressStart,
+    this.onOpenSharedFolder,
   });
 
   @override
@@ -28,6 +31,7 @@ class MessageBubble extends StatelessWidget {
     final out = msg.outgoing;
     final scheme = Theme.of(context).colorScheme;
     final palette = ChatPalette.of(context);
+    final shared = FolderInvite.parse(msg.text);
     final metaColor = out
         ? palette.onOutgoing.withValues(alpha: .88)
         : scheme.onSurfaceVariant;
@@ -72,7 +76,41 @@ class MessageBubble extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (msg.kind == MsgKind.text)
+              if (shared != null)
+                InkWell(
+                  onTap: onOpenSharedFolder,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.folder_shared_outlined, size: 30),
+                        const SizedBox(width: 12),
+                        Flexible(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                shared.name,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                out ? '共享文件夹 · 点击管理' : '共享文件夹 · 点击浏览',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: metaColor,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else if (msg.kind == MsgKind.text)
                 MessageText(
                   text: msg.text ?? '',
                   color: out ? palette.onOutgoing : scheme.onSurface,

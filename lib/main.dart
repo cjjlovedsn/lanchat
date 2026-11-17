@@ -17,6 +17,7 @@ import 'core/outbox.dart';
 import 'core/store.dart';
 import 'core/transfer_client.dart';
 import 'core/transfer_server.dart';
+import 'core/shared_folders.dart';
 import 'state/chats_model.dart';
 import 'state/peers_model.dart';
 import 'state/transfers_model.dart';
@@ -75,6 +76,7 @@ Future<void> main() async {
   );
   await alerts.initialize();
   final transfers = TransfersModel();
+  final sharedFolders = SharedFolders(store, transfers: transfers);
   final outbox = Outbox(
     store: store,
     peers: peers,
@@ -91,6 +93,7 @@ Future<void> main() async {
     peers: peers,
     chats: chats,
     transfers: transfers,
+    sharedFolders: sharedFolders,
   );
   await server.start();
 
@@ -149,6 +152,7 @@ Future<void> main() async {
       windowTitle: windowTitle,
       updates: updates,
       alerts: alerts,
+      sharedFolders: sharedFolders,
     ),
   );
 }
@@ -165,6 +169,7 @@ class LanChatApp extends StatelessWidget {
   final String windowTitle;
   final AppUpdates updates;
   final MessageAlerts alerts;
+  final SharedFolders sharedFolders;
 
   const LanChatApp({
     super.key,
@@ -179,6 +184,7 @@ class LanChatApp extends StatelessWidget {
     this.windowTitle = K.appName,
     required this.updates,
     required this.alerts,
+    required this.sharedFolders,
   });
 
   @override
@@ -186,6 +192,7 @@ class LanChatApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         Provider<AppStore>.value(value: store),
+        ChangeNotifierProvider<SharedFolders>.value(value: sharedFolders),
         ChangeNotifierProvider<MessageAlerts>.value(value: alerts),
         ChangeNotifierProvider<AppUpdates>.value(value: updates),
         ChangeNotifierProvider<StartupService>.value(value: startup),
