@@ -190,6 +190,9 @@ class FileCard extends StatelessWidget {
   static const _imageExt = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'};
   static const _videoExt = {'mp4', 'mkv', 'mov', 'avi', 'm4v', 'webm', '3gp'};
 
+  static bool isImageMessage(ChatMessage msg) =>
+      msg.kind == MsgKind.file && _imageExt.contains(_extOf(msg.fileName));
+
   static String? _extOf(String? name) {
     final n = name ?? '';
     final dot = n.lastIndexOf('.');
@@ -257,7 +260,7 @@ class FileCard extends StatelessWidget {
     final hasLocal = path != null && File(path).existsSync();
     final fileGone = !msg.outgoing && !hasLocal; // received file cleaned up
     final ext = _extOf(msg.fileName);
-    final isImage = _imageExt.contains(ext);
+    final isImage = isImageMessage(msg);
     final isVideo = _videoExt.contains(ext);
     final palette = ChatPalette.of(context);
     final dark = msg.outgoing

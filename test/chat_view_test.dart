@@ -15,6 +15,7 @@ import 'package:lanchat/state/peers_model.dart';
 import 'package:lanchat/state/transfers_model.dart';
 import 'package:lanchat/ui/app_theme.dart';
 import 'package:lanchat/ui/chat_view.dart';
+import 'package:lanchat/ui/widgets/bubble.dart';
 
 class _ComposerFixture {
   final Outbox outbox;
@@ -83,6 +84,161 @@ class _ComposerFixture {
 }
 
 void main() {
+  testWidgets(
+    'received and sent images copy bitmap content from their context menu',
+    (tester) async {
+      final fixture = await _ComposerFixture.mount(tester);
+      final context = tester.element(find.byType(ChatView));
+      final chats = context.read<ChatsModel>();
+      final store = context.read<AppStore>();
+      final image = File('${store.base.path}/photo.JPG')
+        ..writeAsBytesSync(
+          File('assets/brand/lanchat_icon.png').readAsBytesSync(),
+        );
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      const pasteboard = MethodChannel('pasteboard');
+      List<int>? copied;
+      messenger.setMockMethodCallHandler(pasteboard, (call) async {
+        expect(call.method, 'writeImage');
+        copied = Platform.isWindows
+            ? File(
+                (call.arguments as Map)['fileName'] as String,
+              ).readAsBytesSync()
+            : List<int>.from(call.arguments as List);
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(pasteboard, null));
+      for (final outgoing in [false, true]) {
+        final msg = ChatMessage(
+          id: 'image-$outgoing',
+          outgoing: outgoing,
+          kind: MsgKind.file,
+          fileName: 'photo.JPG',
+          filePath: image.path,
+          fileSize: image.lengthSync(),
+          ts: DateTime.now(),
+          state: outgoing ? SendState.delivered : SendState.received,
+        );
+        if (outgoing) {
+          chats.recordAck('peer', msg);
+        } else {
+          chats.onIncoming('peer', msg);
+        }
+        await tester.pumpAndSettle();
+        final bubble = find.byWidgetPredicate(
+          (w) => w is MessageBubble && w.msg.id == msg.id,
+        );
+        final thumbnail = find.descendant(
+          of: bubble,
+          matching: find.byType(Image),
+        );
+        await tester.ensureVisible(thumbnail);
+        await tester.tap(thumbnail, buttons: kSecondaryMouseButton);
+        await tester.pumpAndSettle();
+        expect(find.text('复制图片'), findsOneWidget);
+        copied = null;
+        await tester.tap(find.text('复制图片'));
+        final timer = Stopwatch()..start();
+        while (copied == null) {
+          if (timer.elapsed > const Duration(seconds: 5)) {
+            throw TestFailure('Image copy did not complete');
+          }
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 10)),
+          );
+          await tester.pump();
+        }
+        await tester.pumpAndSettle();
+        expect(copied!.take(8), [137, 80, 78, 71, 13, 10, 26, 10]);
+        expect(find.text('图片已复制'), findsWidgets);
+        expect(tester.takeException(), isNull);
+      }
+      await fixture.close(tester);
+    },
+  );
+
+  testWidgets(
+    'missing images and ordinary attachments have no image copy action; clipboard failures are reported',
+    (tester) async {
+      final fixture = await _ComposerFixture.mount(tester);
+      final context = tester.element(find.byType(ChatView));
+      final chats = context.read<ChatsModel>();
+      final store = context.read<AppStore>();
+      for (final name in ['document.txt', 'missing.png']) {
+        final path = '${store.base.path}/$name';
+        if (name.endsWith('.txt')) File(path).writeAsStringSync('text');
+        chats.onIncoming(
+          'peer',
+          ChatMessage(
+            id: name,
+            outgoing: false,
+            kind: MsgKind.file,
+            fileName: name,
+            filePath: path,
+            ts: DateTime.now(),
+            state: SendState.received,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(name), buttons: kSecondaryMouseButton);
+        await tester.pumpAndSettle();
+        expect(find.text('复制图片'), findsNothing);
+        await tester.tap(find.text('多选'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('取消'));
+        await tester.pumpAndSettle();
+      }
+      final photo = File('${store.base.path}/photo.png')
+        ..writeAsBytesSync(
+          File('assets/brand/lanchat_icon.png').readAsBytesSync(),
+        );
+      chats.onIncoming(
+        'peer',
+        ChatMessage(
+          id: 'photo',
+          outgoing: false,
+          kind: MsgKind.file,
+          fileName: 'photo.png',
+          filePath: photo.path,
+          ts: DateTime.now(),
+          state: SendState.received,
+        ),
+      );
+      const pasteboard = MethodChannel('pasteboard');
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(
+        pasteboard,
+        (_) async => throw PlatformException(code: 'clipboard-busy'),
+      );
+      addTearDown(() => messenger.setMockMethodCallHandler(pasteboard, null));
+      await tester.pumpAndSettle();
+      final image = find.descendant(
+        of: find.byWidgetPredicate(
+          (w) => w is MessageBubble && w.msg.id == 'photo',
+        ),
+        matching: find.byType(Image),
+      );
+      await tester.ensureVisible(image);
+      await tester.tap(image, buttons: kSecondaryMouseButton);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('复制图片'));
+      final timer = Stopwatch()..start();
+      while (find.textContaining('复制图片失败').evaluate().isEmpty) {
+        if (timer.elapsed > const Duration(seconds: 5)) {
+          throw TestFailure('Missing clipboard error');
+        }
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+        await tester.pump();
+      }
+      expect(tester.takeException(), isNull);
+      await fixture.close(tester);
+    },
+  );
+
   testWidgets(
     'blank row menu clears only current history and pending after confirmation',
     (tester) async {
@@ -156,9 +312,8 @@ void main() {
       ).readAsBytesSync();
       // The Windows pasteboard plugin hands the image over as a temp file
       // path that the Dart side reads and deletes; other platforms get bytes.
-      final imageFile = File(
-        '${store.base.path}/pasted-image.bin',
-      )..writeAsBytesSync(imageBytes);
+      final imageFile = File('${store.base.path}/pasted-image.bin')
+        ..writeAsBytesSync(imageBytes);
       var mode = 'files';
       const native = MethodChannel('lanchat/clipboard');
       const pasteboard = MethodChannel('pasteboard');

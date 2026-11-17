@@ -39,6 +39,7 @@ class _ChatViewState extends State<ChatView> {
   bool _codeMode = false;
   bool _savingText = false;
   bool _pasting = false;
+  bool _copyingImage = false;
   bool _composerFocused = false;
   int _lastCount = 0;
   final Set<String> _selected = {};
@@ -221,11 +222,29 @@ class _ChatViewState extends State<ChatView> {
     }
   }
 
+  Future<void> _copyImage(ChatMessage msg) async {
+    if (_copyingImage || msg.filePath == null) return;
+    setState(() => _copyingImage = true);
+    try {
+      await ClipboardAttachments.copyImage(msg.filePath!);
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('图片已复制')));
+      }
+    } catch (_) {
+      if (mounted) _showError('复制图片失败，请确认图片文件仍可读取后重试');
+    } finally {
+      if (mounted) setState(() => _copyingImage = false);
+    }
+  }
+
   Future<void> _showMsgMenu(ChatMessage msg, Offset globalPos) async {
     final canSave =
         msg.kind == MsgKind.file &&
         msg.filePath != null &&
         File(msg.filePath!).existsSync();
+    final canCopyImage = canSave && FileCard.isImageMessage(msg);
     String? action;
     if (Platform.isAndroid) {
       action = await showModalBottomSheet<String>(
@@ -234,6 +253,13 @@ class _ChatViewState extends State<ChatView> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (canCopyImage)
+                ListTile(
+                  leading: const Icon(Icons.copy_rounded),
+                  title: const Text('复制图片'),
+                  enabled: !_copyingImage,
+                  onTap: () => Navigator.of(ctx).pop('copy-image'),
+                ),
               ListTile(
                 leading: const Icon(Icons.delete_outline),
                 title: const Text('删除该条'),
@@ -266,6 +292,13 @@ class _ChatViewState extends State<ChatView> {
           overlay.size.height - globalPos.dy,
         ),
         items: [
+          if (canCopyImage)
+            PopupMenuItem(
+              value: 'copy-image',
+              height: 40,
+              enabled: !_copyingImage,
+              child: const Text('复制图片'),
+            ),
           const PopupMenuItem(value: 'delete', height: 40, child: Text('删除该条')),
           if (canSave)
             const PopupMenuItem(
@@ -279,6 +312,8 @@ class _ChatViewState extends State<ChatView> {
     }
     if (!mounted) return;
     switch (action) {
+      case 'copy-image':
+        await _copyImage(msg);
       case 'delete':
         await _deleteMessages({msg.id});
       case 'save':

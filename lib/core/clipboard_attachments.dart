@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/services.dart';
 import 'package:pasteboard/pasteboard.dart';
@@ -11,6 +12,30 @@ import 'store.dart';
 /// take priority over an image thumbnail or a filename in the text flavor.
 class ClipboardAttachments {
   static const _native = MethodChannel('lanchat/clipboard');
+
+  /// Decode first so invalid files never replace the clipboard, and use PNG
+  /// for consistent bitmap clipboard support across desktop and Android.
+  static Future<void> copyImage(String path) async {
+    final codec = await ui.instantiateImageCodec(
+      await File(path).readAsBytes(),
+    );
+    try {
+      final frame = await codec.getNextFrame();
+      try {
+        final png = await frame.image.toByteData(
+          format: ui.ImageByteFormat.png,
+        );
+        if (png == null) throw const FormatException('无法读取图片内容');
+        await Pasteboard.writeImage(
+          png.buffer.asUint8List(png.offsetInBytes, png.lengthInBytes),
+        );
+      } finally {
+        frame.image.dispose();
+      }
+    } finally {
+      codec.dispose();
+    }
+  }
 
   static Future<List<String>> read(
     AppStore store, {
